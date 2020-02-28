@@ -1,0 +1,5 @@
+firmware/sdkconfig.old
+firmware/build
+!firmware/build/bootloader/bootloader.bin
+!firmware/build/firecam.bin
+!firmware/build/partitions_singleapp.bin

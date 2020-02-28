@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist SYSTEM "file://localhost/System/Library/DTDs/PropertyList.dtd">
+<plist version="0.9">
+<dict>
+   <key>CFBundleExecutable</key>
+   <string>firecam</string>
+   <key>CFBundleName</key>
+   <string>firecam</string>
+   <key>CFBundleIdentifier</key>
+   <string>com.danjuliodesigns.firecam</string>
+   <key>CFBundleInfoDictionaryVersion</key>
+   <string>6.0</string>
+   <key>CFBundleVersion</key>
+   <string>1.0.0.2.0</string>
+   <key>CFBundleDevelopmentRegion</key>
+   <string>en</string>
+   <key>CFBundlePackageType</key>
+   <string>APPL</string>
+   <key>CFBundleSignature</key>
+   <string>????</string>
+   <key>NSHumanReadableCopyright</key>
+   <string>danjuliodesigns, LLC</string>
+   <key>CFBundleShortVersionString</key>
+   <string></string>
+   <key>CFBundleIconFile</key>
+   <string>App</string>
+   <key>LSMinimumSystemVersion</key>
+   <string>10.10.0</string>
+<key>NSHighResolutionCapable</key><true/>
+<key>NSRequiresAquaSystemAppearance</key><false/>
+<key>CFBundleSupportedPlatforms</key><array><string>MacOSX</string></array>
+   <key>UTImportedTypeDeclarations</key>
+   <array>
+      <dict>
+         <key>UTTypeIdentifier</key>
+         <string>public.text</string>
+         <key>UTTypeTagSpecification</key>
+         <dict>
+            <key>public.filename-extension</key>
+            <array>
+            <string>json</string>
+            </array>
+            <key>com.apple.ostype</key>
+            <array>
+               <string>TEXT</string>
+            </array>
+         </dict>
+      </dict>
+   </array>
+
+</dict>
+</plist>
