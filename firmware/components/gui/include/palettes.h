@@ -30,9 +30,13 @@
 //
 
 // Available palettes
-#define PALETTE_FUSION 0
-#define PALETTE_GRAY   1
-#define PALETTE_COUNT  2
+#define PALETTE_GRAY      0
+#define PALETTE_FUSION    1
+#define PALETTE_RAINBOW   2
+#define PALETTE_RAINBOW2  3
+#define PALETTE_IRONBLACK 4
+#define PALETTE_ARCTIC    5
+#define PALETTE_COUNT     6
 
 typedef const uint8_t palette_map_t[256][3];
 
@@ -65,5 +69,7 @@ extern int cur_palette;
 // Palette API
 //
 void set_palette(int n);
+char* get_palette_name(int n);
+int get_palette_by_name(const char* name);
 
 #endif

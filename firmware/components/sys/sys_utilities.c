@@ -24,9 +24,11 @@
  */
 #include "esp_system.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "driver/spi_master.h"
+#include "system_config.h"
 #include "adc_utilities.h"
 #include "file_utilities.h"
 #include "json_utilities.h"
@@ -37,6 +39,7 @@
 #include "wifi_utilities.h"
 #include "gui_screen_main.h"
 #include "i2c.h"
+#include "palettes.h"
 #include "ov2640.h"
 #include "render_jpg.h"
 #include "vospi.h"
@@ -47,6 +50,40 @@
 // System Utilities variables
 //
 static const char* TAG = "sys";
+
+
+// Recording intervals
+const record_interval_t record_intervals[REC_INT_NUM] = {
+	{
+		.name = REC_INT_0_NAME,
+		.interval = REC_INT_0_VAL
+	},
+	{
+		.name = REC_INT_1_NAME,
+		.interval = REC_INT_1_VAL
+	},
+	{
+		.name = REC_INT_2_NAME,
+		.interval = REC_INT_2_VAL
+	},
+	{
+		.name = REC_INT_3_NAME,
+		.interval = REC_INT_3_VAL
+	},
+	{
+		.name = REC_INT_4_NAME,
+		.interval = REC_INT_4_VAL
+	},
+	{
+		.name = REC_INT_5_NAME,
+		.interval = REC_INT_5_VAL
+	},
+	{
+		.name = REC_INT_6_NAME,
+		.interval = REC_INT_6_VAL
+	}
+};
+
 
 
 //
@@ -73,6 +110,7 @@ cam_buffer_t sys_cam_buffer;   // Loaded by cam_task with jpeg data for other ta
 lep_buffer_t sys_lep_buffer;   // Loaded by lep_task for other task
 json_image_string_t sys_image_file_buffer;   // Loaded by app_task with image data for file_task
 json_image_string_t sys_cmd_response_buffer; // Loaded by app_task with image data for cmd_task
+gui_state_t gui_st;            // Shared GUI control variables
 
 // Big buffers
 uint16_t* gui_cam_bufferP;    // Loaded by gui_task for its own use
@@ -164,6 +202,7 @@ bool system_peripheral_init()
 {
 	ESP_LOGI(TAG, "System Peripheral Initialization");
 	
+	// Time and PS init first so other modules can use data from them
 	time_init();
 	ps_init();
 	
@@ -232,7 +271,14 @@ bool system_buffer_init()
 	// Allocate the lepton frame buffer in the external RAM
 	sys_lep_buffer.lep_bufferP = heap_caps_malloc(LEP_NUM_PIXELS*2, MALLOC_CAP_SPIRAM);
 	if (sys_lep_buffer.lep_bufferP == NULL) {
-		ESP_LOGE(TAG, "malloc lepton shared buffer failed");
+		ESP_LOGE(TAG, "malloc lepton shared image buffer failed");
+		return false;
+	}
+		
+	// Allocate the lepton telemetry buffer in the external RAM
+	sys_lep_buffer.lep_telemP = heap_caps_malloc(LEP_TEL_WORDS*2, MALLOC_CAP_SPIRAM);
+	if (sys_lep_buffer.lep_telemP == NULL) {
+		ESP_LOGE(TAG, "malloc lepton shared telemetry buffer failed");
 		return false;
 	}
 	
@@ -279,6 +325,9 @@ bool system_buffer_init()
 		return false;
 	}
 	
+	// Initialize GUI state (that may be used by other modules) from persistent storage
+	ps_get_gui_state(&gui_st);
+	
 	return true;
 }
 
@@ -313,4 +362,21 @@ void system_lock_vspi()
 void system_unlock_vspi()
 {
 	xSemaphoreGive(vspi_mutex);
+}
+
+
+/**
+ * Attempt to find the specified recording interval in record_intervals, otherwise return -1
+ */
+int system_get_rec_interval_index(int rec_interval)
+{
+	int i;
+	
+	for (i=0; i<REC_INT_NUM; i++) {
+		if (rec_interval == record_intervals[i].interval) {
+			return i;
+		}
+	}
+	
+	return -1;
 }

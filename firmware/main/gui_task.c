@@ -39,6 +39,8 @@
 #include "gui_utilities.h"
 #include "sys_utilities.h"
 #include "gui_screen_main.h"
+#include "gui_screen_network.h"
+#include "gui_screen_settings.h"
 #include "gui_screen_time.h"
 #include "gui_screen_poweroff.h"
 #include "gui_screen_wifi.h"
@@ -49,8 +51,9 @@
 
 // LVGL sub-task indicies
 #define LVGL_ST_MAIN_STATUS 0
-#define LVGL_ST_EVENT       1
-#define LVGL_ST_NUM         2
+#define LVGL_ST_SETTINGS    1
+#define LVGL_ST_EVENT       2
+#define LVGL_ST_NUM         3
 
 
 //
@@ -128,9 +131,11 @@ void gui_set_screen(int n)
 		gui_cur_screen_index = n;
 		
 		gui_screen_main_set_active(n == GUI_SCREEN_MAIN);
+		gui_screen_settings_active(n == GUI_SCREEN_SETTINGS);
 		gui_screen_time_set_active(n == GUI_SCREEN_TIME);
 		gui_screen_wifi_set_active(n == GUI_SCREEN_WIFI);
-		gui_screen_poweroff_set_active(n == GUI_SCREEN_TIME);
+		gui_screen_network_set_active(n == GUI_SCREEN_NETWORK);
+		gui_screen_poweroff_set_active(n == GUI_SCREEN_POWEROFF);
 		
 		lv_scr_load(gui_screens[n]);
 	}
@@ -180,8 +185,10 @@ static void gui_screen_init()
 {
 	// Initialize the screens
 	gui_screens[GUI_SCREEN_MAIN] = gui_screen_main_create();
+	gui_screens[GUI_SCREEN_SETTINGS] = gui_screen_settings_create();
 	gui_screens[GUI_SCREEN_TIME] = gui_screen_time_create();
 	gui_screens[GUI_SCREEN_WIFI] = gui_screen_wifi_create();
+	gui_screens[GUI_SCREEN_NETWORK] = gui_screen_network_create();
 	gui_screens[GUI_SCREEN_POWEROFF] = gui_screen_poweroff_create();
 }
 
@@ -191,9 +198,13 @@ static void gui_screen_init()
  */
 static void gui_add_subtasks()
 {
-	// Status line update sub-task runs once per second
+	// Main screen Status line update sub-task runs once per second
 	lvgl_tasks[LVGL_ST_MAIN_STATUS] = lv_task_create(gui_screen_main_status_update_task,
 		1000, LV_TASK_PRIO_MID, NULL);
+		
+	// Settings screen IP address update sub-task runs once per second
+	lvgl_tasks[LVGL_ST_SETTINGS] = lv_task_create(gui_screen_settings_update_task,
+		1000, LV_TASK_PRIO_LOW, NULL);
 		
 	// Event handler sub-task runs every 100 mSec
 	lvgl_tasks[LVGL_ST_EVENT] = lv_task_create(gui_task_event_handler_task, 100,
@@ -250,10 +261,6 @@ static void gui_task_event_handler_task(lv_task_t * task)
 		if (Notification(notification_value, GUI_NOTIFY_CLR_REC_MASK)) {
 			image_num = 0;
 			gui_screen_main_update_rec_count(image_num);
-		}
-		
-		if (Notification(notification_value, GUI_NOTIFY_NEW_WIFI_MASK)) {
-			gui_main_screen_update_wifi();
 		}
 		
 		if (Notification(notification_value, GUI_NOTIFY_MESSAGEBOX_MASK)) {

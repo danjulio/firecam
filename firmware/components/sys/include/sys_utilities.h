@@ -32,6 +32,19 @@
 #include <stdint.h>
 
 
+
+//
+// System Utilities constants
+//
+
+// Gain mode
+#define SYS_GAIN_HIGH 0
+#define SYS_GAIN_LOW  1
+#define SYS_GAIN_AUTO 2
+#define SYS_GAIN_DD_STRING "High\nLow\nAuto"
+
+
+
 //
 // System Utilities typedefs
 //
@@ -41,16 +54,32 @@ typedef struct {
 } cam_buffer_t;
 
 typedef struct {
-	float lep_aux_temp;
-	float lep_fpa_temp;
-	uint32_t lep_gain_mode;
+	bool telem_valid;
+	uint16_t lep_min_val;
+	uint16_t lep_max_val;
 	uint16_t* lep_bufferP;
+	uint16_t* lep_telemP;
 } lep_buffer_t;
 
 typedef struct {
 	uint32_t length;
 	char* bufferP;
 } json_image_string_t;
+
+typedef struct {
+	bool rec_arducam_enable;
+	bool rec_lepton_enable;
+	uint8_t gain_mode;
+	uint16_t record_interval;
+	int record_interval_index;
+	int palette_index;
+} gui_state_t;
+
+typedef struct {
+  char name[32];
+  uint16_t interval;
+} record_interval_t;
+
 
 
 
@@ -84,11 +113,14 @@ extern cam_buffer_t sys_cam_buffer;   // Loaded by cam_task with jpeg data for o
 extern lep_buffer_t sys_lep_buffer;   // Loaded by lep_task for other tasks
 extern json_image_string_t sys_image_file_buffer;   // Loaded by app_task with image data for file_task
 extern json_image_string_t sys_cmd_response_buffer; // Loaded by app_task with image data for cmd_task
+extern gui_state_t gui_st;            // Shared GUI control variables
 
 // Big buffers
 extern uint16_t* gui_cam_bufferP;    // Loaded by gui_task for its own use
 extern uint16_t* gui_lep_bufferP;    // Loaded by gui_task for its own use
 
+// Recording intervals
+extern const record_interval_t record_intervals[REC_INT_NUM];
 
 
 //
@@ -100,5 +132,8 @@ bool system_buffer_init();
 void system_shutoff();
 void system_lock_vspi();
 void system_unlock_vspi();
+int system_get_rec_interval_index(int rec_interval);
+
+#define system_get_gui_st() (&gui_st)
  
 #endif /* SYS_UTILITIES_H */

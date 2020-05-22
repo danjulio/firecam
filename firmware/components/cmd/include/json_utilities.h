@@ -34,6 +34,7 @@
 #define JSON_UTILITIES_H
 
 #include "ds3232.h"
+#include "sys_utilities.h"
 #include "wifi_utilities.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -47,10 +48,13 @@
 bool json_init();
 cJSON* json_get_cmd_object(char* json_string);
 char* json_get_image_file_string(int seq_num, bool has_cam, bool has_lep, uint32_t* len);
+char* json_get_config(uint32_t* len);
 char* json_get_status(uint32_t* len);
+char* json_get_wifi(uint32_t* len);
 bool json_parse_cmd(cJSON* cmd_obj, int* cmd, cJSON** cmd_args);
+bool json_parse_set_config(cJSON* cmd_args, gui_state_t* new_st);
 bool json_parse_set_time(cJSON* cmd_args, tmElements_t* te);
-bool json_parse_set_wifi(cJSON* cmd_args, wifi_info_t* wifi_info);
+bool json_parse_set_wifi(cJSON* cmd_args, wifi_info_t* new_wifi_info);
 void json_free_cmd(cJSON* cmd);
 
 #endif /* JSON_UTILITIES_H */

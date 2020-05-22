@@ -49,7 +49,6 @@
 lv_obj_t* gui_screen_main_create();
 void gui_screen_main_set_active(bool en);
 void gui_screen_main_status_update_task(lv_task_t * task);
-void gui_main_screen_update_wifi();
 void gui_screen_main_update_cam_image();
 void gui_screen_main_update_lep_image();
 void gui_screen_main_update_rec_led(bool en);

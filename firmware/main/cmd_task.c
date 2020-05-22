@@ -24,6 +24,7 @@
 #include "app_task.h"
 #include "cmd_task.h"
 #include "json_utilities.h"
+#include "lepton_utilities.h"
 #include "ps_utilities.h"
 #include "sys_utilities.h"
 #include "time_utilities.h"
@@ -54,7 +55,6 @@ static uint32_t response_length;
 static char rx_circular_buffer[CMD_MAX_TCP_RX_BUFFER_LEN];
 static int rx_circular_push_index;
 static int rx_circular_pop_index;
-static int rx_circular_length;
 
 // json command string buffer
 static char json_cmd_string[JSON_MAX_CMD_TEXT_LEN];
@@ -239,7 +239,6 @@ static void init_command_processor()
 	
 	rx_circular_push_index = 0;
 	rx_circular_pop_index = 0;
-	rx_circular_length = 0;
 }
 
 
@@ -251,12 +250,10 @@ static void process_rx_data(char* data, int len)
 {
 	int begin, end, i;
 	
-	// Push the received data into the circular buffer, throwing away data rather than
-	// overflowing the circular buffer
+	// Push the received data into the circular buffer
 	while (len-- > 0) {
 		rx_circular_buffer[rx_circular_push_index] = *data++;
 		if (++rx_circular_push_index >= CMD_MAX_TCP_RX_BUFFER_LEN) rx_circular_push_index = 0;
-		if (++rx_circular_length >= CMD_MAX_TCP_RX_BUFFER_LEN) break;
 	}
 	
 	// See if we can find an entire json string
@@ -268,31 +265,32 @@ static void process_rx_data(char* data, int len)
 			// Found packet - copy it, without delimiters to json_cmd_string
 			//
 			// Skip past start
-			while (rx_circular_pop_index <= begin) {
+			while (rx_circular_pop_index != begin) {
 				if (++rx_circular_pop_index >= CMD_MAX_TCP_RX_BUFFER_LEN) rx_circular_pop_index = 0;
-				rx_circular_length--;
 			}
 			
 			// Copy up to end
 			i = 0;
-			while (rx_circular_pop_index < end) {
-				json_cmd_string[i++] = rx_circular_buffer[rx_circular_pop_index];
+			while ((rx_circular_pop_index != end) && (i < CMD_MAX_TCP_RX_BUFFER_LEN)) {
+				if (i < JSON_MAX_CMD_TEXT_LEN) {
+					json_cmd_string[i] = rx_circular_buffer[rx_circular_pop_index];
+				}
+				i++;
 				if (++rx_circular_pop_index >= CMD_MAX_TCP_RX_BUFFER_LEN) rx_circular_pop_index = 0;
-				rx_circular_length--;
 			}
-			json_cmd_string[i] = 0;
+			json_cmd_string[i] = 0;               // Make sure this is a null-terminated string
 			
 			// Skip past end
 			if (++rx_circular_pop_index >= CMD_MAX_TCP_RX_BUFFER_LEN) rx_circular_pop_index = 0;
-			rx_circular_length--;
 			
-			// Process json command string
-			process_rx_packet();
+			if (i < JSON_MAX_CMD_TEXT_LEN+1) {
+				// Process json command string
+				process_rx_packet();
+			}
 		} else {
 			// Unexpected end without start - skip it
-			while (rx_circular_pop_index < end) {
+			while (rx_circular_pop_index != end) {
 				if (++rx_circular_pop_index >= CMD_MAX_TCP_RX_BUFFER_LEN) rx_circular_pop_index = 0;
-				rx_circular_length--;
 			}
 		}
 	}
@@ -301,13 +299,16 @@ static void process_rx_data(char* data, int len)
 
 static void process_rx_packet()
 {
-	char ssid[PS_SSID_MAX_LEN+1];
-	char pw[PS_PW_MAX_LEN+1];
+	char ap_ssid[PS_SSID_MAX_LEN+1];
+	char sta_ssid[PS_SSID_MAX_LEN+1];
+	char ap_pw[PS_PW_MAX_LEN+1];
+	char sta_pw[PS_PW_MAX_LEN+1];
 	cJSON* json_obj;
 	cJSON* cmd_args;
+	gui_state_t new_gui_st;
 	int cmd;
 	tmElements_t te;
-	wifi_info_t wifi_info;
+	wifi_info_t new_wifi_info;
 	
 	response_expected = false; // Will be set true if necessary
 	response_available = false;
@@ -319,7 +320,7 @@ static void process_rx_packet()
 			switch (cmd) {
 				case CMD_GET_STATUS:
 					response_buffer = json_get_status(&response_length);
-					ESP_LOGI(TAG, "cmd get_status");
+					ESP_LOGI(TAG, "cmd " CMD_GET_STATUS_S);
 					if (response_length != 0) {
 						response_expected = true;
 						response_available = true;
@@ -328,42 +329,77 @@ static void process_rx_packet()
 					break;
 					
 				case CMD_GET_IMAGE:
-					ESP_LOGI(TAG, "cmd get_image");
+					ESP_LOGI(TAG, "cmd " CMD_GET_IMAGE_S);
 					response_buffer = sys_cmd_response_buffer.bufferP;
 					response_expected = true;
 					response_available = false;
 					xTaskNotify(task_handle_app, APP_NOTIFY_CMD_REQ_MASK, eSetBits);
 					break;
 					
-				case CMD_SET_TIME:
-					ESP_LOGI(TAG, "cmd set_time");
+				case CMD_SET_TIME:					
+					ESP_LOGI(TAG, "cmd " CMD_SET_TIME_S);
 					if (json_parse_set_time(cmd_args, &te)) {
 						time_set(te);
 					}
 					break;
 				
+				case CMD_GET_WIFI:
+					response_buffer = json_get_wifi(&response_length);
+					ESP_LOGI(TAG, "cmd " CMD_GET_WIFI_S);
+					if (response_length != 0) {
+						response_expected = true;
+						response_available = true;
+						response_was_image = false;
+					}
+					break;
+					
 				case CMD_SET_WIFI:
-					wifi_info.ssid = ssid;
-					wifi_info.pw = pw;
-					ESP_LOGI(TAG, "cmd set_wifi");
-					if (json_parse_set_wifi(cmd_args, &wifi_info)) {
-						ps_set_wifi_info(&wifi_info);
+					new_wifi_info.ap_ssid = ap_ssid;
+					new_wifi_info.sta_ssid = sta_ssid;
+					new_wifi_info.ap_pw = ap_pw;
+					new_wifi_info.sta_pw = sta_pw;
+					ESP_LOGI(TAG, "cmd " CMD_SET_WIFI_S);
+					if (json_parse_set_wifi(cmd_args, &new_wifi_info)) {
+						ps_set_wifi_info(&new_wifi_info);
 						xTaskNotify(task_handle_app, APP_NOTIFY_NEW_WIFI_MASK, eSetBits);
 					}
 					break;
 				
+				case CMD_GET_CONFIG:
+					response_buffer = json_get_config(&response_length);
+					ESP_LOGI(TAG, "cmd " CMD_GET_CONFIG_S);
+					if (response_length != 0) {
+						response_expected = true;
+						response_available = true;
+						response_was_image = false;
+					}
+					break;
+					
+				case CMD_SET_CONFIG:
+					ESP_LOGI(TAG, "cmd " CMD_SET_CONFIG_S);
+					if (json_parse_set_config(cmd_args, &new_gui_st)) {
+						// Look for changed items that require updating other modules
+						if (new_gui_st.gain_mode != gui_st.gain_mode) {
+							lepton_gain_mode(new_gui_st.gain_mode);
+						}
+						gui_st = new_gui_st;
+						ps_set_gui_state(&gui_st);
+						xTaskNotify(task_handle_app, APP_NOTIFY_RECORD_PARM_UPD_MASK, eSetBits);
+					}
+					break;
+				
 				case CMD_RECORD_ON:
-					ESP_LOGI(TAG, "cmd record_on");
+					ESP_LOGI(TAG, "cmd " CMD_RECORD_ON_S);
 					xTaskNotify(task_handle_app, APP_NOTIFY_START_RECORD_MASK, eSetBits);
 					break;
 				
 				case CMD_RECORD_OFF:
-					ESP_LOGI(TAG, "cmd record_off");
+					ESP_LOGI(TAG, "cmd " CMD_RECORD_OFF_S);
 					xTaskNotify(task_handle_app, APP_NOTIFY_STOP_RECORD_MASK, eSetBits);
 					break;
 					
 				case CMD_POWEROFF:
-					ESP_LOGI(TAG, "cmd poweroff");
+					ESP_LOGI(TAG, "cmd " CMD_POWEROFF_S);
 					xTaskNotify(task_handle_app, APP_NOTIFY_SHUTDOWN_MASK, eSetBits);
 					break;
 				
@@ -407,7 +443,7 @@ static int in_buffer(char c)
 	int i;
 	
 	i = rx_circular_pop_index;
-	while (i < rx_circular_push_index) {
+	while (i != rx_circular_push_index) {
 		if (c == rx_circular_buffer[i]) {
 			return i;
 		} else {
@@ -417,4 +453,3 @@ static int in_buffer(char c)
 	
 	return -1;
 }
-

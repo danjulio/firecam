@@ -37,15 +37,26 @@
 #define WIFI_INFO_FLAG_INITIALIZED    0x02
 #define WIFI_INFO_FLAG_ENABLED        0x04
 #define WIFI_INFO_FLAG_CONNECTED      0x08
+#define WIFI_INFO_FLAG_CL_STATIC_IP   0x10
+#define WIFI_INFO_FLAG_CLIENT_MODE    0x80
+
+// Maximum attempts to reconnect to an AP in client mode
+#define WIFI_MAX_RECONNECT_ATTEMPTS   5
+
 
 
 //
 // WiFi Utilities Data structures
 //
 typedef struct {
-	char* ssid;
-	char* pw;
+	char* ap_ssid;             // AP SSID is also the Camera Name
+	char* sta_ssid;
+	char* ap_pw;
+	char* sta_pw;
 	uint8_t flags;
+	uint8_t ap_ip_addr[4];
+	uint8_t sta_ip_addr[4];
+	uint8_t cur_ip_addr[4];
 } wifi_info_t;
 
 

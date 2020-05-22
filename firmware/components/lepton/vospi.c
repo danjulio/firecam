@@ -2,6 +2,8 @@
  * Lepton VoSPI Module
  *
  * Contains the functions to get frames from a Lepton 3.5 via its SPI port.
+ * Optionally supports collecting telemetry when enabled as a footer (does not
+ * support telemetry enabled as a header).
  *
  * Copyright 2020 Dan Julio
  *
@@ -54,9 +56,15 @@ static uint8_t* lepPacketP;
 // Lepton Frame buffer (16-bit values)
 static uint16_t lepBuffer[LEP_NUM_PIXELS];
 
+// Lepton Telemetry buffer (16-bit values)
+static uint16_t lepTelem[LEP_TEL_WORDS];
+
 // Processing State
 static int curSegment = 1;
+static int curLinesPerSeg = LEP_NOTEL_PKTS_PER_SEG;
+static int curWordsPerSeg = LEP_NOTEL_WORDS_PER_SEG;
 static bool validSegmentRegion = false;
+static bool includeTelemetry = false;
 
 
 
@@ -65,7 +73,8 @@ static bool validSegmentRegion = false;
 // VoSPI Forward Declarations for internal functions
 //
 static bool transfer_packet(uint8_t* line, uint8_t* seg);
-static void copy_packet_to_buffer(uint8_t line);
+static void copy_packet_to_lepton_buffer(uint8_t line);
+static void copy_packet_to_telem_buffer(uint8_t line);
 
 
 
@@ -146,14 +155,17 @@ bool vospi_transfer_segment(uint64_t vsyncDetectedUsec)
 					}
 				}
         
-				// Copy the data to the lepton frame buffer
+				// Copy the data to the lepton frame buffer or telemetry buffer
 				//  - beforeValidData is used to collect data before we know if the current segment (1) is valid
 				//  - then we use validSegmentRegion for remaining data once we know we're seeing valid data
-				if ((beforeValidData || validSegmentRegion) && (line <= 59)) {
-					copy_packet_to_buffer(line);
+				if (includeTelemetry && validSegmentRegion && (curSegment == 4) && (line >= 57)) {
+					copy_packet_to_telem_buffer(line - 57);
+				}
+				else if ((beforeValidData || validSegmentRegion) && (line < curLinesPerSeg)) {
+					copy_packet_to_lepton_buffer(line);
 				}
 	
-				if (line == 59) {
+				if (line == (curLinesPerSeg-1)) {
 					// Saw a complete segment, move to next segment or complete frame aquisition if possible
 					if (validSegmentRegion) {
 						if (curSegment < 4) {
@@ -183,16 +195,47 @@ bool vospi_transfer_segment(uint64_t vsyncDetectedUsec)
 
 
 /**
- * Load the shared buffer from our buffer for another task
+ * Load the a system buffer from our buffers for another task
  */
-void vospi_get_frame(uint16_t* bufP)
+void vospi_get_frame(lep_buffer_t* sys_bufP)
 {
+	uint16_t* sptr = sys_bufP->lep_bufferP;
 	uint16_t* lptr = &lepBuffer[0];
+	uint16_t min = 0xFFFF;
+	uint16_t max = 0x0000;
+	uint16_t t16;
 
-	// Load into the c_frame
+	// Load lepton image data
 	while (lptr < &lepBuffer[LEP_NUM_PIXELS]) {
-		*bufP++ = *lptr++;
+		t16 = *lptr++;
+		if (t16 < min) min = t16;
+		if (t16 > max) max = t16;
+		*sptr++ = t16;
 	}
+	sys_bufP->lep_min_val = min;
+	sys_bufP->lep_max_val = max;
+	
+	// Optionally load telemetry
+	sys_bufP->telem_valid = includeTelemetry;
+	if (includeTelemetry) {
+		sptr = sys_bufP->lep_telemP;
+		lptr = &lepTelem[0];
+		while (lptr < &lepTelem[LEP_TEL_WORDS]) {
+			*sptr++ = *lptr++;
+		}
+	}
+}
+
+
+/**
+ * Configure the pipeline to include telemetry or not.
+ * This should be done during initialization
+ */
+void vospi_include_telem(bool en)
+{
+	includeTelemetry = en;
+	curLinesPerSeg = (en) ? LEP_TEL_PKTS_PER_SEG : LEP_NOTEL_PKTS_PER_SEG;
+	curWordsPerSeg = (en) ? LEP_TEL_WORDS_PER_SEG : LEP_NOTEL_WORDS_PER_SEG;
 }
 
 
@@ -208,7 +251,7 @@ void vospi_get_frame(uint16_t* bufP)
  *    - line contains the packet line number for all valid packets
  *    - seg contains the packet segment number if the line number is 20
  */
-bool transfer_packet(uint8_t* line, uint8_t* seg)
+static bool transfer_packet(uint8_t* line, uint8_t* seg)
 {
 	bool valid = false;
 	esp_err_t ret;
@@ -253,10 +296,10 @@ bool transfer_packet(uint8_t* line, uint8_t* seg)
  * Copy the lepton packet to the raw lepton frame
  *   - line specifies packet line number
  */
-void copy_packet_to_buffer(uint8_t line)
+static void copy_packet_to_lepton_buffer(uint8_t line)
 {
 	uint8_t* lepPopPtr = lepPacketP + 4;
-	uint16_t* acqPushPtr = &lepBuffer[((curSegment-1) * 30 * LEP_WIDTH) + (line * (LEP_WIDTH/2))];
+	uint16_t* acqPushPtr = &lepBuffer[((curSegment-1) * curWordsPerSeg) + (line * (LEP_WIDTH/2))];
 	uint16_t t;
 
 	while (lepPopPtr <= (lepPacketP + (LEP_PKT_LENGTH-1))) {
@@ -265,4 +308,25 @@ void copy_packet_to_buffer(uint8_t line)
 		*acqPushPtr++ = t;
 	}
 }
+
+
+/**
+ * Copy the lepton packet to the telemetry buffer
+ *   - line specifies packet line number (only 0-2 are valid, do not call with line 3)
+ */
+static void copy_packet_to_telem_buffer(uint8_t line)
+{
+	uint8_t* lepPopPtr = lepPacketP + 4;
+	uint16_t* telPushPtr = &lepTelem[line * (LEP_WIDTH/2)];
+	uint16_t t;
+	
+	if (line > 2) return;
+	
+	while (lepPopPtr <= (lepPacketP + (LEP_PKT_LENGTH-1))) {
+		t = *lepPopPtr++ << 8;
+		t |= *lepPopPtr++;
+		*telPushPtr++ = t;
+	}
+}
+
 

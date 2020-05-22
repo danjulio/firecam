@@ -86,11 +86,6 @@ static char timeset_string[32];   // "HH:MM:SS MM/DD/YY" + room for #FFFFFF n# r
 static bool time_screen_active;
 
 // Keypad array
-/*
-static const char* btnm_map[] = {"1", "2", "3", "4", "5", "\n",
-                                 "6", "7", "8", "9", "0", "\n",
-                                 "Cancel", "Save", "<", ">", ""};
-*/
 static const char* btnm_map[] = {"1", "2", "3", "4", "5", "\n",
                                  "6", "7", "8", "9", "0", "\n",
                                  LV_SYMBOL_CLOSE, LV_SYMBOL_OK, LV_SYMBOL_LEFT, LV_SYMBOL_RIGHT, ""};
@@ -465,13 +460,13 @@ static void btn_set_time_keypad_callback(lv_obj_t * btn, lv_event_t event)
 		uint16_t n = lv_btnm_get_active_btn(btn);
 	
 		if (n == BTNM_MAP_CANCEL) {
-			// Bail back to main screen
-			gui_set_screen(GUI_SCREEN_MAIN);
+			// Bail back to settings screen
+			gui_set_screen(GUI_SCREEN_SETTINGS);
 		} else if (n == BTNM_MAP_SAVE) {
-			// Set the time before going back to the main screen
+			// Set the time before going back to the settings screen
 			fix_timeset_value();
 			time_set(timeset_value);
-			gui_set_screen(GUI_SCREEN_MAIN);
+			gui_set_screen(GUI_SCREEN_SETTINGS);
 		} else if (n == BTNM_MAP_LEFT) {
 			// Decrement to the previous digit
 			if (timeset_index > BTNM_MAP_1) {

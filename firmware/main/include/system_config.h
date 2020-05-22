@@ -25,6 +25,7 @@
 #define SYSTEM_CONFIG_H
 
 #include "esp_system.h"
+#include "cci.h"
 #include "ov2640.h"
 
 
@@ -124,6 +125,9 @@
 #define CAM_MAX_JPG_LEN     32768
 #endif
 
+// Lepton default gain mode
+#define LEP_DEF_GAIN_MODE  LEP_SYS_GAIN_MODE_HIGH
+
 // Combined image (ArduCAM + Lepton + Metadata) json object text size
 // Based on the following items:
 //   1. Base64 encoded ArduCAM maximum image size: CAM_MAX_JPG_LEN*4 / 3
@@ -150,6 +154,24 @@
 
 // TCP/IP listening port
 #define CMD_PORT 5001
+
+
+// Recording Intervals and names
+#define REC_INT_0_VAL  1
+#define REC_INT_0_NAME "1 Second"
+#define REC_INT_1_VAL  5
+#define REC_INT_1_NAME "5 Seconds"
+#define REC_INT_2_VAL  30
+#define REC_INT_2_NAME "30 Seconds"
+#define REC_INT_3_VAL  60
+#define REC_INT_3_NAME "1 Minute"
+#define REC_INT_4_VAL  300
+#define REC_INT_4_NAME "5 Minutes"
+#define REC_INT_5_VAL  1800
+#define REC_INT_5_NAME "30 Minutes"
+#define REC_INT_6_VAL  3600
+#define REC_INT_6_NAME "1 Hour"
+#define REC_INT_NUM    7
 
 
 

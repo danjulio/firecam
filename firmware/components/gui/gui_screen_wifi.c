@@ -59,16 +59,24 @@ static lv_obj_t* lbl_pw;
 static lv_obj_t* ta_pw;
 static lv_obj_t* btn_show_password;
 static lv_obj_t* lbl_btn_show_password;
+static lv_obj_t* cb_ap_en;
 static lv_obj_t* cb_wifi_en;
 static lv_obj_t* kbd;
 
 // Screen WiFi information
-static char wifi_ssid_array[PS_SSID_MAX_LEN+1];
-static char wifi_pw_array[PS_PW_MAX_LEN+1];
-static wifi_info_t wifi_info = {
-	wifi_ssid_array,
-	wifi_pw_array,
-	0
+static char wifi_ap_ssid_array[PS_SSID_MAX_LEN+1];
+static char wifi_sta_ssid_array[PS_SSID_MAX_LEN+1];
+static char wifi_ap_pw_array[PS_PW_MAX_LEN+1];
+static char wifi_sta_pw_array[PS_PW_MAX_LEN+1];
+static wifi_info_t local_wifi_info = {
+	wifi_ap_ssid_array,
+	wifi_sta_ssid_array,
+	wifi_ap_pw_array,
+	wifi_sta_pw_array,
+	0,
+	{0, 0, 0, 0},
+	{0, 0, 0, 0},
+	{0, 0, 0, 0}
 };
 
 // Screen state
@@ -91,6 +99,7 @@ static void set_show_password_icon();
 static void ssid_ta_callback(lv_obj_t* ta, lv_event_t event);
 static void pw_ta_callback(lv_obj_t* ta, lv_event_t event);
 static void show_pw_btn_callback(lv_obj_t* lbl, lv_event_t event);
+static void ap_en_cb_callback(lv_obj_t* cb, lv_event_t event);
 static void wifi_en_cb_callback(lv_obj_t* cb, lv_event_t event);
 static void kbd_callback(lv_obj_t* kb, lv_event_t event);
 
@@ -109,10 +118,10 @@ lv_obj_t* gui_screen_wifi_create()
 	//
 	// Screen Title
 	lbl_wifi_title = lv_label_create(wifi_screen, NULL);
-	lv_obj_set_pos(lbl_wifi_title, 10, 5);
+	lv_obj_set_pos(lbl_wifi_title, 110, 5);
 	lv_obj_set_width(lbl_wifi_title, 100);
 	lv_label_set_align(lbl_wifi_title, LV_LABEL_ALIGN_LEFT);
-	lv_label_set_static_text(lbl_wifi_title, "Set WiFi Access Point");
+	lv_label_set_static_text(lbl_wifi_title, "WiFi Settings");
 	
 	// WiFi SSID text entry area label
 	lbl_ssid = lv_label_create(wifi_screen, NULL);
@@ -157,9 +166,16 @@ lv_obj_t* gui_screen_wifi_create()
 	set_show_password_icon();
 	lv_label_set_static_text(lbl_btn_show_password, lbl_btn_show_password_text);
 	
+	// Access Point Enable checkbox
+	cb_ap_en = lv_cb_create(wifi_screen, NULL);
+	lv_obj_set_pos(cb_ap_en, 256, 13);
+	lv_obj_set_width(cb_ap_en, 40);
+	lv_cb_set_static_text(cb_ap_en, "AP");
+	lv_obj_set_event_cb(cb_ap_en, ap_en_cb_callback);
+	
 	// WiFi Enable checkbox
 	cb_wifi_en = lv_cb_create(wifi_screen, NULL);
-	lv_obj_set_pos(cb_wifi_en, 230, 10);
+	lv_obj_set_pos(cb_wifi_en, 5, 13);
 	lv_obj_set_width(cb_wifi_en, 40);
 	lv_cb_set_static_text(cb_wifi_en, "Enable");
 	lv_obj_set_event_cb(cb_wifi_en, wifi_en_cb_callback);
@@ -217,11 +233,18 @@ void gui_screen_wifi_set_active(bool en)
  */
 static void update_values_from_ps()
 {
-	ps_get_wifi_info(&wifi_info);
+	ps_get_wifi_info(&local_wifi_info);
 	
-	lv_ta_set_text(ta_ssid, wifi_info.ssid);
-	lv_ta_set_text(ta_pw, wifi_info.pw);
-	lv_cb_set_checked(cb_wifi_en, ((wifi_info.flags & WIFI_INFO_FLAG_STARTUP_ENABLE) != 0));
+	if ((local_wifi_info.flags & WIFI_INFO_FLAG_CLIENT_MODE) != 0) {
+		lv_ta_set_text(ta_ssid, local_wifi_info.sta_ssid);
+		lv_ta_set_text(ta_pw, local_wifi_info.sta_pw);
+	} else {
+		lv_ta_set_text(ta_ssid, local_wifi_info.ap_ssid);
+		lv_ta_set_text(ta_pw, local_wifi_info.ap_pw);
+	}
+	
+	lv_cb_set_checked(cb_ap_en, ((local_wifi_info.flags & WIFI_INFO_FLAG_CLIENT_MODE) == 0));
+	lv_cb_set_checked(cb_wifi_en, ((local_wifi_info.flags & WIFI_INFO_FLAG_STARTUP_ENABLE) != 0));
 }
 
 
@@ -314,15 +337,40 @@ static void show_pw_btn_callback(lv_obj_t* lbl, lv_event_t event)
 
 
 /**
+ * Access Point Enable Checkbox handler
+ */
+static void ap_en_cb_callback(lv_obj_t* cb, lv_event_t event)
+{
+	if (event == LV_EVENT_VALUE_CHANGED) {
+		if (lv_cb_is_checked(cb)) {
+			local_wifi_info.flags &= ~WIFI_INFO_FLAG_CLIENT_MODE;
+		} else {
+			local_wifi_info.flags |= WIFI_INFO_FLAG_CLIENT_MODE;
+		}
+		
+		// Update the text areas with values for this mode
+		if ((local_wifi_info.flags & WIFI_INFO_FLAG_CLIENT_MODE) != 0) {
+			lv_ta_set_text(ta_ssid, local_wifi_info.sta_ssid);
+			lv_ta_set_text(ta_pw, local_wifi_info.sta_pw);
+		} else {
+			lv_ta_set_text(ta_ssid, local_wifi_info.ap_ssid);
+			lv_ta_set_text(ta_pw, local_wifi_info.ap_pw);
+		}
+		lv_ta_set_cursor_pos(selected_text_area_lv_obj, LV_TA_CURSOR_LAST);
+	}
+}
+
+
+/**
  * Wifi Enable Checkbox handler
  */
 static void wifi_en_cb_callback(lv_obj_t* cb, lv_event_t event)
 {
 	if (event == LV_EVENT_VALUE_CHANGED) {
 		if (lv_cb_is_checked(cb)) {
-			wifi_info.flags |= WIFI_INFO_FLAG_STARTUP_ENABLE;
+			local_wifi_info.flags |= WIFI_INFO_FLAG_STARTUP_ENABLE;
 		} else {
-			wifi_info.flags &= ~WIFI_INFO_FLAG_STARTUP_ENABLE;
+			local_wifi_info.flags &= ~WIFI_INFO_FLAG_STARTUP_ENABLE;
 		}
 	}
 }
@@ -337,7 +385,8 @@ static void kbd_callback(lv_obj_t* kb, lv_event_t event)
 {
 	// First look for close keys
 	if (event == LV_EVENT_CANCEL) {
-		gui_set_screen(GUI_SCREEN_MAIN);
+		// Exit without changing anything
+		gui_set_screen(GUI_SCREEN_SETTINGS);
 	}
 	
 	if (event == LV_EVENT_APPLY) {
@@ -350,20 +399,24 @@ static void kbd_callback(lv_obj_t* kb, lv_event_t event)
 			gui_message_box(wifi_screen, "WPA2 passwords must be at least 8 characters");
 		} else {
 			// Copy the text area strings to our data structure
-			strcpy(wifi_info.ssid, ssid_ta_str);
-			strcpy(wifi_info.pw, pw_ta_str);
+			if ((local_wifi_info.flags & WIFI_INFO_FLAG_CLIENT_MODE) != 0) {
+				strcpy(local_wifi_info.sta_ssid, ssid_ta_str);
+				strcpy(local_wifi_info.sta_pw, pw_ta_str);
+			} else {
+				strcpy(local_wifi_info.ap_ssid, ssid_ta_str);
+				strcpy(local_wifi_info.ap_pw, pw_ta_str);
+			}
 			
 			// Save the new WiFi configuration
-			ps_set_wifi_info(&wifi_info);
+			ps_set_wifi_info(&local_wifi_info);
 
 			// Notify app_task of the update
 			xTaskNotify(task_handle_app, APP_NOTIFY_NEW_WIFI_MASK, eSetBits);
 			
-			gui_set_screen(GUI_SCREEN_MAIN);
+			gui_set_screen(GUI_SCREEN_SETTINGS);
 		}
 	}
 	
 	// Then let the normal keyboard handler run (text handling in attached text area)
 	lv_kb_def_event_cb(kb, event);
 }
-

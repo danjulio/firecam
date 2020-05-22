@@ -61,15 +61,17 @@ static lv_obj_t* btn_record;
 static lv_obj_t* btn_record_label;
 static lv_obj_t* led_record;
 static lv_obj_t* lbl_record_image_num;
-static lv_obj_t* btn_set_time;
-static lv_obj_t* btn_set_time_label;
-static lv_obj_t* btn_set_wifi;
-static lv_obj_t* btn_set_wifi_label;
+static lv_obj_t* btn_settings;
+static lv_obj_t* btn_settings_label;
+static lv_obj_t* btn_poweroff;
+static lv_obj_t* btn_poweroff_label;
 
 // Screen state
 static bool main_screen_active;
 
 // Displayed object state to reduce redraws
+static char prev_ssid[PS_SSID_MAX_LEN];
+static uint8_t prev_flags;
 static batt_status_t prev_bs;
 static bool prev_sdcard_present;
 static int prev_temp;
@@ -82,13 +84,14 @@ static uint16_t prev_record_count;
 //
 static char* main_screen_get_name_version();
 static void main_screen_initialize_dynamic_values();
+static void main_screen_update_wifi();
 static void main_screen_update_sdcard();
 static void main_screen_update_batt();
 static void main_screen_update_time();
 static void main_screen_update_temp();
 static void btn_record_callback(lv_obj_t * btn, lv_event_t event);
-static void btn_set_time_callback(lv_obj_t * btn, lv_event_t event);
-static void btn_set_wifi_callback(lv_obj_t * btn, lv_event_t event);
+static void btn_settings_callback(lv_obj_t * btn, lv_event_t event);
+static void btn_poweroff_callback(lv_obj_t * btn, lv_event_t event);
 
 
 
@@ -116,7 +119,7 @@ lv_obj_t* gui_screen_main_create()
 	lbl_ssid = lv_label_create(main_screen, NULL);
 	lv_obj_set_pos(lbl_ssid, 120, 2);
 	lv_obj_set_width(lbl_ssid, 80);
-	gui_main_screen_update_wifi();
+	lv_label_set_recolor(lbl_ssid, true);
 	
 	lbl_sdcard_status = lv_label_create(main_screen, NULL);
 	lv_obj_set_pos(lbl_sdcard_status, 250, 2);
@@ -165,15 +168,13 @@ lv_obj_t* gui_screen_main_create()
 	lv_img_set_src(img_lepton, &lepton_img_dsc);
 	lv_obj_set_pos(img_lepton, 160, 40);
 	
-	set_palette(PALETTE_FUSION);
-	
 	// Button Area
 	btn_record = lv_btn_create(main_screen, NULL);
 	lv_obj_set_pos(btn_record, 20, 165);
-	lv_obj_set_size(btn_record, 100, 30);
+	lv_obj_set_size(btn_record, 100, 70);
 	lv_obj_set_event_cb(btn_record, btn_record_callback);
 	btn_record_label = lv_label_create(btn_record, NULL);
-	lv_label_set_static_text(btn_record_label, "Record");
+	lv_label_set_static_text(btn_record_label, "REC");
 	
 	// Create a style for the LED
 	static lv_style_t style_led;
@@ -189,30 +190,28 @@ lv_obj_t* gui_screen_main_create()
 	
 	led_record = lv_led_create(main_screen, NULL);
 	lv_obj_set_style(led_record, &style_led);
-	lv_obj_set_pos(led_record, 135, 165);
+	lv_obj_set_pos(led_record, 145, 165);
 	lv_obj_set_size(led_record, 30, 30);
 	lv_led_off(led_record);
 	
 	lbl_record_image_num = lv_label_create(main_screen, NULL);
-	lv_obj_set_pos(lbl_record_image_num, 70, 210);
+	lv_obj_set_pos(lbl_record_image_num, 140, 210);
 	lv_obj_set_width(lbl_record_image_num, 60);
 	lv_label_set_align(lbl_record_image_num, LV_LABEL_ALIGN_RIGHT);
-	prev_record_count = 1; // Force an update
-	gui_screen_main_update_rec_count(0);
 	
-	btn_set_time = lv_btn_create(main_screen, NULL);
-	lv_obj_set_pos(btn_set_time, 205, 166);
-	lv_obj_set_size(btn_set_time, 100, 30);
-	lv_obj_set_event_cb(btn_set_time, btn_set_time_callback);
-	btn_set_time_label = lv_label_create(btn_set_time, NULL);
-	lv_label_set_static_text(btn_set_time_label, "Time");
+	btn_settings = lv_btn_create(main_screen, NULL);
+	lv_obj_set_pos(btn_settings, 205, 180);
+	lv_obj_set_size(btn_settings, 40, 40);
+	lv_obj_set_event_cb(btn_settings, btn_settings_callback);
+	btn_settings_label = lv_label_create(btn_settings, NULL);
+	lv_label_set_static_text(btn_settings_label, LV_SYMBOL_SETTINGS);
 	
-	btn_set_wifi = lv_btn_create(main_screen, NULL);
-	lv_obj_set_pos(btn_set_wifi, 205, 204);
-	lv_obj_set_size(btn_set_wifi, 100, 30);
-	lv_obj_set_event_cb(btn_set_wifi, btn_set_wifi_callback);
-	btn_set_wifi_label = lv_label_create(btn_set_wifi, NULL);
-	lv_label_set_static_text(btn_set_wifi_label, "WiFi");
+	btn_poweroff = lv_btn_create(main_screen, NULL);
+	lv_obj_set_pos(btn_poweroff, 265, 180);
+	lv_obj_set_size(btn_poweroff, 40, 40);
+	lv_obj_set_event_cb(btn_poweroff, btn_poweroff_callback);
+	btn_poweroff_label = lv_label_create(btn_poweroff, NULL);
+	lv_label_set_static_text(btn_poweroff_label, LV_SYMBOL_POWER);
 
 	main_screen_active = false;
 	
@@ -243,33 +242,12 @@ void gui_screen_main_set_active(bool en)
 void gui_screen_main_status_update_task(lv_task_t * task)
 {
 	if (main_screen_active) {
+		main_screen_update_wifi();
 		main_screen_update_sdcard();
 		main_screen_update_batt();
 		main_screen_update_time();
 		main_screen_update_temp();
 	}
-}
-
-
-/**
- * Update the Wifi status
- */
-void gui_main_screen_update_wifi()
-{
-	static char wifi_label[PS_SSID_MAX_LEN + 5];   // Statically allocated for lv_label_set_static_text
-	wifi_info_t* wifi_info;
-	
-	wifi_info = wifi_get_info();
-	
-	// Update the label with the SSID and optional WiFi Icon to indicate active
-	memset(wifi_label, 0, sizeof(wifi_label));
-	if ((wifi_info->flags & WIFI_INFO_FLAG_ENABLED) != 0) {
-		sprintf(wifi_label, "%s %s", wifi_info->ssid, LV_SYMBOL_WIFI);
-	} else {
-		strcpy(wifi_label, wifi_info->ssid);
-	}
-	
-	lv_label_set_static_text(lbl_ssid, wifi_label);
 }
 
 
@@ -301,26 +279,16 @@ void gui_screen_main_update_lep_image()
 	uint32_t diff;
 	uint16_t* ptr = sys_lep_buffer.lep_bufferP;
 	uint16_t* ptr2 = gui_lep_bufferP;
-	uint16_t min_lep_val = 0xFFFF;
-	uint16_t max_lep_val = 0x0000;
-	uint16_t t16;
 	uint8_t t8;
 	
-	// Find the minimum and maximum values
-	while (ptr < (sys_lep_buffer.lep_bufferP + LEP_NUM_PIXELS)) {
-		t16 = *ptr++;
-		if (t16 < min_lep_val) min_lep_val = t16;
-		if (t16 > max_lep_val) max_lep_val = t16;
-	}
-
 	// Copy the source buffer to the destination buffer
 	//  - Scale each source value to an 8-bit intensity value
 	//  - Convert the intensity value to a byte-swapped RGB565 pixel to store
 	ptr = sys_lep_buffer.lep_bufferP;
-	diff = max_lep_val - min_lep_val;
-
+	diff = sys_lep_buffer.lep_max_val - sys_lep_buffer.lep_min_val;
+	
 	while (ptr < (sys_lep_buffer.lep_bufferP + LEP_NUM_PIXELS)) {
-		t32 = ((uint32_t)(*ptr++ - min_lep_val) * 254) / diff;
+		t32 = ((uint32_t)(*ptr++ - sys_lep_buffer.lep_min_val) * 255) / diff;
 		t8 = (t32 > 255) ? 255 : (uint8_t) t32;
 		*ptr2++ = PALLETTE_LOOKUP(t8);
 	}
@@ -386,17 +354,90 @@ static char* main_screen_get_name_version()
  */
 static void main_screen_initialize_dynamic_values()
 {
+	static int prev_palette_index = -1;
+	
 	// Force updates
+	prev_ssid[0] = 0;
+	prev_flags = 0;
 	prev_sdcard_present = !file_get_card_present();
 	prev_bs.batt_state = BATT_CRIT;         /* Pick values hopefully we won't have */
 	prev_bs.charge_state = CHARGE_FAULT;
 	prev_temp = 99999;
+	prev_record_count = 1;
 	
+	main_screen_update_wifi();
 	main_screen_update_sdcard();
 	main_screen_update_batt();
 	main_screen_update_time();
 	main_screen_update_temp();
+	gui_screen_main_update_rec_count(0);
 	
+	if (gui_st.palette_index != prev_palette_index) {
+		prev_palette_index = gui_st.palette_index;
+		set_palette(gui_st.palette_index);
+	}
+	
+}
+
+
+/**
+ * Update the Wifi status
+ */
+static void main_screen_update_wifi()
+{
+	bool ssid_different;
+	bool sta_mode;
+	
+	// Statically allocated for lv_label_set_static_text = "<ssid> #CCCCCC <symbol_3>#" + null
+	static char wifi_label[PS_SSID_MAX_LEN + 14];
+	
+	wifi_info_t* wifi_info;
+	
+	wifi_info = wifi_get_info();
+	
+	sta_mode = ((wifi_info->flags & WIFI_INFO_FLAG_CLIENT_MODE) != 0);
+	
+	if (sta_mode) {
+		ssid_different = (strcmp(prev_ssid, wifi_info->sta_ssid) != 0);
+	} else {
+		ssid_different = (strcmp(prev_ssid, wifi_info->ap_ssid) != 0);
+	}
+	
+	if (ssid_different || (prev_flags != wifi_info->flags)) {
+	    
+		// Update the label with the SSID and optional WiFi Icon to indicate active/connected
+		memset(wifi_label, 0, sizeof(wifi_label));
+		if (sta_mode) {
+			// Client Mode: No icon if interface disabled, dim icon if enabled but not
+			// successfully connected to an AP, bright icon if connected to an AP
+			if ((wifi_info->flags & WIFI_INFO_FLAG_ENABLED) != 0) {
+				if ((wifi_info->flags & WIFI_INFO_FLAG_CONNECTED) != 0) {
+					sprintf(wifi_label, "%s #FFFFFF %s#", wifi_info->sta_ssid, LV_SYMBOL_WIFI);
+				} else {
+					sprintf(wifi_label, "%s #B0B0B0 %s#", wifi_info->sta_ssid, LV_SYMBOL_WIFI);
+				}
+			} else {
+				strcpy(wifi_label, wifi_info->sta_ssid);
+			}
+		} else {
+			// AP Mode: Show WiFi Icon when we have successfully enabled the interface,
+			// otherwise show no icon.
+			if ((wifi_info->flags & WIFI_INFO_FLAG_ENABLED) != 0) {
+				sprintf(wifi_label, "%s #FFFFFF %s#", wifi_info->ap_ssid, LV_SYMBOL_WIFI);
+			} else {
+				strcpy(wifi_label, wifi_info->ap_ssid);
+			}
+		}
+		
+		lv_label_set_static_text(lbl_ssid, wifi_label);
+		
+		if (sta_mode) {
+			strcpy(prev_ssid, wifi_info->sta_ssid);
+		} else {
+			strcpy(prev_ssid, wifi_info->ap_ssid);
+		}
+		prev_flags = wifi_info->flags;
+	}
 }
 
 
@@ -517,17 +558,18 @@ static void btn_record_callback(lv_obj_t * btn, lv_event_t event)
 }
 
 
-static void btn_set_time_callback(lv_obj_t * btn, lv_event_t event)
+static void btn_settings_callback(lv_obj_t * btn, lv_event_t event)
 {
 	if (event == LV_EVENT_CLICKED) {
-		gui_set_screen(GUI_SCREEN_TIME);
+		gui_set_screen(GUI_SCREEN_SETTINGS);
 	}
 }
 
 
-static void btn_set_wifi_callback(lv_obj_t * btn, lv_event_t event)
+static void btn_poweroff_callback(lv_obj_t * btn, lv_event_t event)
 {
 	if (event == LV_EVENT_CLICKED) {
-		gui_set_screen(GUI_SCREEN_WIFI);
+		// Notify app_task to power down
+		xTaskNotify(task_handle_app, APP_NOTIFY_SHUTDOWN_MASK, eSetBits);
 	}
 }

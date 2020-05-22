@@ -11,7 +11,7 @@
    <key>CFBundleInfoDictionaryVersion</key>
    <string>6.0</string>
    <key>CFBundleVersion</key>
-   <string>1.0.0.2.0</string>
+   <string>2.0.0.2.0</string>
    <key>CFBundleDevelopmentRegion</key>
    <string>en</string>
    <key>CFBundlePackageType</key>
@@ -27,7 +27,6 @@
    <key>LSMinimumSystemVersion</key>
    <string>10.10.0</string>
 <key>NSHighResolutionCapable</key><true/>
-<key>NSRequiresAquaSystemAppearance</key><false/>
 <key>CFBundleSupportedPlatforms</key><array><string>MacOSX</string></array>
    <key>UTImportedTypeDeclarations</key>
    <array>

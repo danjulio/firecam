@@ -29,6 +29,7 @@
 #ifndef PS_UTILITIES_H
 #define PS_UTILITIES_H
 
+#include "sys_utilities.h"
 #include "wifi_utilities.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -41,11 +42,13 @@
 
 // Base part of the default SSID/Camera name - the last 4 nibbles of the ESP32's
 // mac address are appended as ASCII characters
-#define PS_DEFAULT_SSID "firecam-"
+#define PS_DEFAULT_AP_SSID "firecam-"
 
 // Field lengths
-#define PS_SSID_MAX_LEN 32
-#define PS_PW_MAX_LEN   32
+#define PS_SSID_MAX_LEN     32
+#define PS_PW_MAX_LEN       32
+#define PS_PALETTE_NAME_LEN 16
+#define PS_REC_INTERVAL_LEN 2
 
 
 
@@ -57,6 +60,7 @@ void ps_get_wifi_info(wifi_info_t* info);
 void ps_set_wifi_info(const wifi_info_t* info);
 bool ps_get_rec_enable();
 void ps_set_rec_enable(bool en);
-
+void ps_get_gui_state(gui_state_t* state);
+void ps_set_gui_state(const gui_state_t* state);
 
 #endif /* PS_UTILITIES_H */

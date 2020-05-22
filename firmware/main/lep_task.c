@@ -43,12 +43,6 @@
 // LEP Task constants
 //
 
-// Uncomment to enable task to attempt to continuously read frames from the Lepton
-// by servicing every Vsync Interrupt.  Comment to enable task to read one frame
-// only when requested via a notification.  Continuously reading frames seems to fail
-// from too-high interrupt->task latency when the system is busy with other tasks.
-//#define LEP_READ_CONTINUOUS
-
 
 
 //
@@ -58,22 +52,6 @@ static const char* TAG = "lep_task";
 
 // Lepton Vsync Interrupt handling
 static volatile int64_t vsyncDetectedUsec;
-
-#ifdef LEP_READ_CONTINUOUS
-static uint32_t vsyncInterrupts = 0;
-static uint32_t processedVsyncInterrupts = 0;
-#endif
-
-
-
-//
-// LEP Task forward declarations for internal functions
-//
-#ifdef LEP_READ_CONTINUOUS
-int init_gpio_interrupt();
-static void gpio_isr_handler();
-#endif
-static float lep_kelvin_2_C(uint32_t k);
 
 
 
@@ -86,55 +64,13 @@ static float lep_kelvin_2_C(uint32_t k);
  */
 void lep_task()
 {
-	uint32_t notification_value;
-	uint32_t lep_value;
-#ifndef LEP_READ_CONTINUOUS
 	bool done;
-	int vsync_count;
-#endif
+	uint32_t notification_value;
+	uint32_t vsync_count;
 	
 	ESP_LOGI(TAG, "Start task");
-
-#ifdef LEP_READ_CONTINUOUS
-	// Initialize the GPIO Interrupt
-	init_gpio_interrupt();
-#endif
   
 	while (1) {
-#ifdef LEP_READ_CONTINUOUS
-		// Block waiting for a notification from the VSYNC ISR to process a segment
-		//  outstandingVsyncInterrupts is incremented by the ISR
-		xTaskNotifyWait(0x00, 0x00, &vsyncInterrupts, portMAX_DELAY);
-
-		// Attempt to process a segment
-		if (vospi_transfer_segment(vsyncDetectedUsec)) {
-			// Got a complete frame from the Lepton
-
-			// Check to see if app_task wants a copy of our latest frame
-			if (xTaskNotifyWait(0x00, 0xFFFFFFFF, &notification_value, 0)) {
-				if ((notification_value && LEP_NOTIFY_GET_FRAME_MASK) == LEP_NOTIFY_GET_FRAME_MASK) {
-					// Get current camera information
-					lep_value = cci_get_aux_temp();
-					sys_lep_buffer.lep_aux_temp = lep_kelvin_2_C(lep_value);
-					lep_value = cci_get_fpa_temp();
-					sys_lep_buffer.lep_fpa_temp = lep_kelvin_2_C(lep_value);
-					lep_value = cci_get_gain_mode();
-					sys_lep_buffer.lep_gain_mode =  lep_value;
-				
-					// Copy the frame to the shared buffer
-					vospi_get_frame(sys_lep_bufferP);
-					
-					// Let app_task know we've updated the buffer
-					xTaskNotify(task_handle_app, APP_NOTIFY_LEP_FRAME_MASK, eSetBits);
-				}
-			}
-		}
-    
-		if (++processedVsyncInterrupts < vsyncInterrupts) {
-			//ESP_LOGW(TAG, "missed interrupt, count = %d", vsyncInterrupts - processedVsyncInterrupts);
-			processedVsyncInterrupts = vsyncInterrupts;
-		}
-#else
 		// Block waiting for a notification that the app_task wants an image
 		xTaskNotifyWait(0x00, 0xFFFFFFFF, &notification_value, portMAX_DELAY);
 		
@@ -148,17 +84,9 @@ void lep_task()
 			vsyncDetectedUsec = esp_timer_get_time();
 			
 			// Attempt to process a segment
-			if (vospi_transfer_segment(vsyncDetectedUsec)) {
-				// Get current camera information
-				lep_value = cci_get_aux_temp();
-				sys_lep_buffer.lep_aux_temp = lep_kelvin_2_C(lep_value);
-				lep_value = cci_get_fpa_temp();
-				sys_lep_buffer.lep_fpa_temp = lep_kelvin_2_C(lep_value);
-				lep_value = cci_get_gain_mode();
-				sys_lep_buffer.lep_gain_mode =  lep_value;
-				
+			if (vospi_transfer_segment(vsyncDetectedUsec)) {				
 				// Copy the frame to the shared buffer
-				vospi_get_frame(sys_lep_buffer.lep_bufferP);
+				vospi_get_frame(&sys_lep_buffer);
 				
 				// Let app_task know we've updated the buffer
 				xTaskNotify(task_handle_app, APP_NOTIFY_LEP_FRAME_MASK, eSetBits);		
@@ -177,55 +105,6 @@ void lep_task()
 				}
 			}
 		}
-#endif
 	}
-}
-
-
-
-//
-// LEP Task forward declarations for internal functions
-//
-
-#ifdef LEP_READ_CONTINUOUS
-/**
- * Configure the VSYNC GPIO input
- */
-int init_gpio_interrupt()
-{
-	esp_err_t ret;
-  
-	// Setup the ISR
-	ret = gpio_install_isr_service(ESP_INTR_FLAG_LEVEL3);
-	ESP_ERROR_CHECK(ret);
-	ret = gpio_set_intr_type(LEP_VSYNC_IO, GPIO_INTR_POSEDGE);
-	ESP_ERROR_CHECK(ret);
-	ret = gpio_isr_handler_add(LEP_VSYNC_IO, gpio_isr_handler, NULL);
-	ESP_ERROR_CHECK(ret);
-  
-	return ESP_OK;
-}
-
-
-/**
- * VSYNC Interrupt Service Routine
- */
-static void gpio_isr_handler()
-{
-	// Note when we saw this interrupt
-	vsyncDetectedUsec = esp_timer_get_time();
-  
-	// Unblock our task
-	xTaskNotifyFromISR(task_handle_lep, 0, eIncrement, NULL);
-}
-#endif
-
-
-/**
- * Convert a temperature reading from the lepton (in units of K * 100) to C
- */
-static float lep_kelvin_2_C(uint32_t k)
-{
-	return ((float) k / 100) - 273.15;
 }
 

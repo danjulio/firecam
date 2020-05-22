@@ -87,7 +87,11 @@ static bool lep_gui_update_pending = false;
 static bool sdcard_present = false;    // Can't start recording unless a card is present
 static bool app_recording = false;
 static bool file_image_send_pending = false;
+static bool app_rec_arducam_en;
+static bool app_rec_lepton_en;
 static uint16_t app_rec_seq_num = 0;
+static uint16_t app_rec_interval;      // Seconds between images when recording
+static uint16_t app_rec_interval_cnt;  // Counts interval up to app_rec_interval to trigger picture
 
 static bool cmd_requesting_image = false;
 static bool cmd_image_send_pending = false;
@@ -99,7 +103,7 @@ static bool cmd_image_send_pending = false;
 static void app_task_handle_notifications();
 static void app_task_start_recording(bool from_gui);
 static void app_task_stop_recording(bool en_restart);
-static void app_process_images(bool process_cam, bool process_lep);
+static void app_process_images(bool valid_cam, bool valid_lep);
 
 
 //
@@ -114,6 +118,12 @@ void app_task()
 	
 	// Let other tasks start running first
 	vTaskDelay(pdMS_TO_TICKS(100));
+	
+	// Get initial recording values
+	app_rec_arducam_en = gui_st.rec_arducam_enable;
+	app_rec_lepton_en = gui_st.rec_lepton_enable;
+	app_rec_interval = gui_st.record_interval;
+	app_rec_interval_cnt = 0;
 	
 	// If we were recording when we last powered down (e.g. crashed and rebooted) then
 	// notify ourselves to start recording again immediately.
@@ -306,6 +316,15 @@ static void app_task_handle_notifications()
 		}
 		
 		//
+		// RECORDING PARAMETERS
+		//
+		if (Notification(notification_value, APP_NOTIFY_RECORD_PARM_UPD_MASK)) {
+			app_rec_arducam_en = gui_st.rec_arducam_enable;
+			app_rec_lepton_en = gui_st.rec_lepton_enable;
+			app_rec_interval = gui_st.record_interval;
+		}
+		
+		//
 		// FILE OPERATIONS
 		//
 		if (Notification(notification_value, APP_NOTIFY_SDCARD_PRESENT_MASK)) {
@@ -320,6 +339,7 @@ static void app_task_handle_notifications()
 			// file_task has initiated recording
 			app_recording = true;
 			app_rec_seq_num = 1;
+			app_rec_interval_cnt = 0;
 			ps_set_rec_enable(true);
 			xTaskNotify(task_handle_gui, GUI_NOTIFY_LED_ON_MASK, eSetBits);
 		}
@@ -378,8 +398,6 @@ static void app_task_handle_notifications()
 				gui_preset_message_box_string("Could not restart WiFi with the new configuration");
 				xTaskNotify(task_handle_gui, GUI_NOTIFY_MESSAGEBOX_MASK, eSetBits);
 			}				
-			// Update the displayed WiFi configuration
-			xTaskNotify(task_handle_gui, GUI_NOTIFY_NEW_WIFI_MASK, eSetBits);
 		}
 	}
 }
@@ -408,6 +426,7 @@ static void app_task_stop_recording(bool en_restart)
 	if (app_recording) {
 		app_recording = false;
 		app_rec_seq_num = 0;
+		app_rec_interval_cnt = 0;
 	
 		xTaskNotify(task_handle_file, FILE_NOTIFY_STOP_RECORDING_MASK, eSetBits);
 		xTaskNotify(task_handle_gui, GUI_NOTIFY_LED_OFF_MASK, eSetBits);
@@ -428,27 +447,39 @@ static void app_task_stop_recording(bool en_restart)
 }
 
 
-static void app_process_images(bool process_cam, bool process_lep)
+static void app_process_images(bool valid_cam, bool valid_lep)
 {
+	bool process_cam;
+	bool process_lep;
 	char* image_json_text;
 	uint32_t image_json_len;
+	
+	// Determine what images to process
+	process_cam = valid_cam && (!app_recording || (app_recording && app_rec_arducam_en));
+	process_lep = valid_lep && (!app_recording || (app_recording && app_rec_lepton_en));
 	
 	// Get the image json text string
 	image_json_text = json_get_image_file_string(app_rec_seq_num, process_cam, process_lep,
 	                                             &image_json_len);
 	
 	// Send it to file_task for writing if we are recording and a send not already pending
-	if (!file_image_send_pending && app_recording) {
-		if (image_json_len < JSON_MAX_IMAGE_TEXT_LEN) {
-			// Copy the image to the shared buffer for file_task
-			memcpy(sys_image_file_buffer.bufferP, image_json_text, image_json_len);
-			sys_image_file_buffer.length = image_json_len;
+	if (app_recording) {
+		if (++app_rec_interval_cnt >= app_rec_interval) {
+			if (!file_image_send_pending && app_recording) {
+				// Record image
+				app_rec_interval_cnt = 0;
+				if (image_json_len < JSON_MAX_IMAGE_TEXT_LEN) {
+					// Copy the image to the shared buffer for file_task
+					memcpy(sys_image_file_buffer.bufferP, image_json_text, image_json_len);
+					sys_image_file_buffer.length = image_json_len;
 			
-			// Notify file_task
-			xTaskNotify(task_handle_file, FILE_NOTIFY_NEW_IMAGE_MASK, eSetBits);
-			file_image_send_pending = true;
-		} else {
-			ESP_LOGE(TAG, "image_json_text (%d bytes) too large for sys_image_file_buffer", image_json_len);
+					// Notify file_task
+					xTaskNotify(task_handle_file, FILE_NOTIFY_NEW_IMAGE_MASK, eSetBits);
+					file_image_send_pending = true;
+				} else {
+					ESP_LOGE(TAG, "image_json_text (%d bytes) too large for sys_image_file_buffer", image_json_len);
+				}
+			}
 		}
 	}
 	

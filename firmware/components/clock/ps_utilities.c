@@ -4,7 +4,7 @@
  * Manage the persistent storage kept in the RTC chip RAM and provide access
  * routines to it.
  *
- * NOTE: It is assumed that only task will access persistent storage at a time.
+ * NOTE: It is assumed that only one task will access persistent storage at a time.
  * This is done to eliminate the need for mutex protection, that could cause a 
  * dead-lock with another process also accessing a device via I2C.
  *
@@ -27,9 +27,11 @@
  *
  */
 #include "ps_utilities.h"
+#include "system_config.h"
 #include "ds3232.h"
 #include "esp_system.h"
 #include "esp_log.h"
+#include "palettes.h"
 #include <stdbool.h>
 #include <string.h>
 
@@ -44,25 +46,48 @@
 
 // Layout version - to allow future firmware versions to change the layout without
 // losing data
-#define PS_LAYOUT_VERSION 1
+#define PS_LAYOUT_VERSION 2
 
 // Memory Array indicies
 //   String regions include an extra byte for a null terminator
+
+// Original version 1 contents
 #define PS_MAGIC_WORD_0_ADDR   0
 #define PS_MAGIC_WORD_1_ADDR   1
 #define PS_LAYOUT_VERSION_ADDR 2
 #define PS_REC_EN_ADDR         3
 #define PS_WIFI_EN_ADDR        4
-#define PS_WIFI_SSID_ADDR      5
-#define PS_WIFI_PW_ADDR        (PS_WIFI_SSID_ADDR + PS_SSID_MAX_LEN + 1)
-#define PS_LAST_VALID_ADDR     (PS_WIFI_PW_ADDR + PS_PW_MAX_LEN + 1)
+#define PS_WIFI_AP_SSID_ADDR   5
+#define PS_WIFI_AP_PW_ADDR     (PS_WIFI_AP_SSID_ADDR + PS_SSID_MAX_LEN + 1)
+
+// Version 2 additions
+#define PS_WIFI_STA_SSID_ADDR  (PS_WIFI_AP_PW_ADDR + PS_PW_MAX_LEN + 1)
+#define PS_WIFI_STA_PW_ADDR    (PS_WIFI_STA_SSID_ADDR + PS_SSID_MAX_LEN + 1)
+#define PS_WIFI_AP_IP_ADDR     (PS_WIFI_STA_PW_ADDR + PS_PW_MAX_LEN + 1)
+#define PS_WIFI_STA_IP_ADDR    (PS_WIFI_AP_IP_ADDR + 4)
+#define PS_REC_ARD_EN_ADDR     (PS_WIFI_STA_IP_ADDR + 4)
+#define PS_REC_LEP_EN_ADDR     (PS_REC_ARD_EN_ADDR + 1)
+#define PS_GAIN_MODE_ADDR      (PS_REC_LEP_EN_ADDR + 1)
+#define PS_PALETTE_NAME_ADDR   (PS_GAIN_MODE_ADDR + 1)
+#define PS_REC_INTERVAL_ADDR   (PS_PALETTE_NAME_ADDR + PS_PALETTE_NAME_LEN + 1)
+
+#define PS_LAST_VALID_ADDR     (PS_REC_INTERVAL_ADDR + PS_REC_INTERVAL_LEN)
 #define PS_CHECKSUM_ADDR       (SRAM_SIZE - 1)
+
+// Update region lengths
+#define PS_REC_EN_UPD_LEN      1
+#define PS_WIFI_UPD_LEN        (PS_REC_ARD_EN_ADDR - PS_WIFI_EN_ADDR)
+#define PS_GUI_UPD_LEN         (PS_LAST_VALID_ADDR - PS_REC_ARD_EN_ADDR)
+
+// Stored Wifi Flags bitmask
+#define PS_WIFI_FLAG_MASK      (WIFI_INFO_FLAG_STARTUP_ENABLE | WIFI_INFO_FLAG_CL_STATIC_IP | WIFI_INFO_FLAG_CLIENT_MODE)
 
 
 enum ps_update_types_t {
 	FULL,                      // Update all bytes in the external SRAM
 	WIFI,                      // Update wifi-related and checksum
-	REC                        // Update record enable and checksum
+	REC,                       // Update record enable and checksum
+	GUI                        // Update GUI state related and checksum
 };
 
 
@@ -82,7 +107,7 @@ static uint8_t ps_shadow_buffer[SRAM_SIZE];
 //
 static bool ps_read_array();
 static bool ps_write_array(enum ps_update_types_t t);
-static void ps_init_array();
+static void ps_init_array(bool upgrade);
 static void ps_store_string(char* s, uint8_t start, uint8_t max_len);
 static bool ps_valid_magic_word();
 static uint8_t ps_compute_checksum();
@@ -99,6 +124,7 @@ static char ps_nibble_to_ascii(uint8_t n);
  * Initialize persistent storage
  *   - Load our local buffer
  *   - Initialize it and the RTC SRAM with valid data if necessary
+ *   - Upgrade version 1 layout if necessary
  */
 void ps_init()
 {
@@ -110,10 +136,13 @@ void ps_init()
 	// Check if it is initialized with valid data, initialize if not
 	if (!ps_valid_magic_word() || (ps_compute_checksum() != ps_shadow_buffer[PS_CHECKSUM_ADDR])) {
 		ESP_LOGI(TAG, "Initialize persistent storage with default values");
-		ps_init_array();
+		ps_init_array(false);
 		if (!ps_write_array(FULL)) {
 			ESP_LOGE(TAG, "Failed to write persistent data to RTC SRAM");
 		}
+	} else if (ps_shadow_buffer[PS_LAYOUT_VERSION_ADDR] == 1) {
+		ESP_LOGI(TAG, "Upgrading persistent storage from version 1");
+		ps_init_array(true);
 	}
 }
 
@@ -125,12 +154,18 @@ void ps_init()
  */
 void ps_get_wifi_info(wifi_info_t* info)
 {
-	strcpy(info->ssid, (const char*) &ps_shadow_buffer[PS_WIFI_SSID_ADDR]);
-	strcpy(info->pw, (const char*) &ps_shadow_buffer[PS_WIFI_PW_ADDR]);
-	if (ps_shadow_buffer[PS_WIFI_EN_ADDR] != 0) {
-		info->flags |= WIFI_INFO_FLAG_STARTUP_ENABLE;
-	} else {
-		info->flags &= ~WIFI_INFO_FLAG_STARTUP_ENABLE;
+	int i;
+	
+	strcpy(info->ap_ssid, (const char*) &ps_shadow_buffer[PS_WIFI_AP_SSID_ADDR]);
+	strcpy(info->ap_pw, (const char*) &ps_shadow_buffer[PS_WIFI_AP_PW_ADDR]);
+	strcpy(info->sta_ssid, (const char*) &ps_shadow_buffer[PS_WIFI_STA_SSID_ADDR]);
+	strcpy(info->sta_pw, (const char*) &ps_shadow_buffer[PS_WIFI_STA_PW_ADDR]);
+	
+	info->flags = ps_shadow_buffer[PS_WIFI_EN_ADDR] & PS_WIFI_FLAG_MASK;
+	
+	for (i=0; i<4; i++) {
+		info->ap_ip_addr[i] = ps_shadow_buffer[PS_WIFI_AP_IP_ADDR + i];
+		info->sta_ip_addr[i] = ps_shadow_buffer[PS_WIFI_STA_IP_ADDR + i];
 	}
 }
 
@@ -140,9 +175,18 @@ void ps_get_wifi_info(wifi_info_t* info)
  */
 void ps_set_wifi_info(const wifi_info_t* info)
 {
-	ps_store_string(info->ssid, PS_WIFI_SSID_ADDR, PS_SSID_MAX_LEN);
-	ps_store_string(info->pw, PS_WIFI_PW_ADDR, PS_PW_MAX_LEN);
-	ps_shadow_buffer[PS_WIFI_EN_ADDR] = (info->flags & WIFI_INFO_FLAG_STARTUP_ENABLE) ? 1 : 0;
+	int i;
+	
+	ps_store_string(info->ap_ssid, PS_WIFI_AP_SSID_ADDR, PS_SSID_MAX_LEN);
+	ps_store_string(info->ap_pw, PS_WIFI_AP_PW_ADDR, PS_PW_MAX_LEN);
+	ps_store_string(info->sta_ssid, PS_WIFI_STA_SSID_ADDR, PS_SSID_MAX_LEN);
+	ps_store_string(info->sta_pw, PS_WIFI_STA_PW_ADDR, PS_PW_MAX_LEN);
+	ps_shadow_buffer[PS_WIFI_EN_ADDR] = info->flags & PS_WIFI_FLAG_MASK;
+	ps_shadow_buffer[PS_CHECKSUM_ADDR] = ps_compute_checksum();
+	for (i=0; i<4; i++) {
+		ps_shadow_buffer[PS_WIFI_AP_IP_ADDR + i] = info->ap_ip_addr[i];
+		ps_shadow_buffer[PS_WIFI_STA_IP_ADDR + i] = info->sta_ip_addr[i];
+	}
 	ps_shadow_buffer[PS_CHECKSUM_ADDR] = ps_compute_checksum();
 	if (!ps_write_array(WIFI)) {
 		ESP_LOGE(TAG, "Failed to write WiFi data to RTC SRAM");
@@ -176,6 +220,66 @@ void ps_set_rec_enable(bool en)
 }
 
 
+/**
+ * Get GUI Camera state
+ */
+void ps_get_gui_state(gui_state_t* state)
+{
+	bool repair_mem = false;
+	
+	state->rec_arducam_enable = ps_shadow_buffer[PS_REC_ARD_EN_ADDR] != 0 ? true : false;
+	state->rec_lepton_enable = ps_shadow_buffer[PS_REC_LEP_EN_ADDR] != 0 ? true : false;
+	
+	state->gain_mode = ps_shadow_buffer[PS_GAIN_MODE_ADDR];
+	
+	state->record_interval = (ps_shadow_buffer[PS_REC_INTERVAL_ADDR] << 8) |
+	                         ps_shadow_buffer[PS_REC_INTERVAL_ADDR + 1];
+	state->record_interval_index = system_get_rec_interval_index(state->record_interval);
+	if (state->record_interval_index < 0) {
+		// Fix illegal entry
+		state->record_interval_index = 0;
+		state->record_interval = record_intervals[state->record_interval_index].interval;
+		ps_shadow_buffer[PS_REC_INTERVAL_ADDR] = state->record_interval >> 8;
+		ps_shadow_buffer[PS_REC_INTERVAL_ADDR + 1] = state->record_interval & 0xFF;
+		repair_mem = true;
+		ESP_LOGE(TAG, "reset record_interval to legal value");
+	}
+	
+	state->palette_index = get_palette_by_name((const char*) &ps_shadow_buffer[PS_PALETTE_NAME_ADDR]);
+	if (state->palette_index < 0) {
+		state->palette_index = 0;
+		ps_store_string(get_palette_name(state->palette_index), PS_PALETTE_NAME_ADDR, PS_PALETTE_NAME_LEN);
+		repair_mem = true;
+		ESP_LOGE(TAG, "reset palette to legal value");
+	}
+	
+	if (repair_mem) {
+		ps_shadow_buffer[PS_CHECKSUM_ADDR] = ps_compute_checksum();
+		if (!ps_write_array(GUI)) {
+			ESP_LOGE(TAG, "Failed to write GUI state to RTC SRAM");
+		}
+	}
+}
+
+ 
+/**
+ * Store GUI Camera state into persistent storage (both the local buffer and RTC SRAM)
+ */
+void ps_set_gui_state(const gui_state_t* state)
+{
+	ps_shadow_buffer[PS_REC_ARD_EN_ADDR] = state->rec_arducam_enable ? 1 : 0;
+	ps_shadow_buffer[PS_REC_LEP_EN_ADDR] = state->rec_lepton_enable ? 1 : 0;
+	ps_shadow_buffer[PS_GAIN_MODE_ADDR] = state->gain_mode;
+	ps_shadow_buffer[PS_REC_INTERVAL_ADDR] = state->record_interval >> 8;
+	ps_shadow_buffer[PS_REC_INTERVAL_ADDR + 1] = state->record_interval & 0xFF;
+	ps_store_string(get_palette_name(state->palette_index), PS_PALETTE_NAME_ADDR, PS_PALETTE_NAME_LEN);
+	ps_shadow_buffer[PS_CHECKSUM_ADDR] = ps_compute_checksum();
+	if (!ps_write_array(GUI)) {
+		ESP_LOGE(TAG, "Failed to write GUI state to RTC SRAM");
+	}
+}
+
+
 
 //
 // PS Utilities internal functions
@@ -195,62 +299,110 @@ static bool ps_read_array()
  */
 static bool ps_write_array(enum ps_update_types_t t)
 {
-	if (t == FULL) {
-		return (ps_write_bytes_to_rtc(SRAM_START_ADDR, ps_shadow_buffer, SRAM_SIZE) == 0);
-	} else if (t == WIFI) {
+	bool ret = false;
+	
+	switch(t) {
+	case FULL:
+		ret = (ps_write_bytes_to_rtc(SRAM_START_ADDR, ps_shadow_buffer, SRAM_SIZE) == 0);
+		break;
+	
+	case WIFI:
 		if (ps_write_bytes_to_rtc(SRAM_START_ADDR + PS_WIFI_EN_ADDR,
 		                          &ps_shadow_buffer[PS_WIFI_EN_ADDR],
-		                          PS_SSID_MAX_LEN + PS_PW_MAX_LEN + 3) == 0) {
-			return (write_rtc_byte(SRAM_START_ADDR + PS_CHECKSUM_ADDR,
+		                          PS_WIFI_UPD_LEN) == 0)
+		{
+			ret = (write_rtc_byte(SRAM_START_ADDR + PS_CHECKSUM_ADDR,
 			                       ps_shadow_buffer[PS_CHECKSUM_ADDR]) == 0);
 		} else {
-			return false;
+			ret = false;
 		}
-	} else if (t == REC) {
+		break;
+	
+	case REC:
 		if (write_rtc_byte(SRAM_START_ADDR + PS_REC_EN_ADDR,
-		                    ps_shadow_buffer[PS_REC_EN_ADDR]) == 0) {
-			return (write_rtc_byte(SRAM_START_ADDR + PS_CHECKSUM_ADDR,
+		                    ps_shadow_buffer[PS_REC_EN_ADDR]) == 0)
+		{
+			ret = (write_rtc_byte(SRAM_START_ADDR + PS_CHECKSUM_ADDR,
 			                       ps_shadow_buffer[PS_CHECKSUM_ADDR]) == 0);
 		} else {
-			return false;
+			ret = false;
 		}
+		break;
+	
+	case GUI:
+		if (ps_write_bytes_to_rtc(SRAM_START_ADDR + PS_REC_ARD_EN_ADDR,
+		                          &ps_shadow_buffer[PS_REC_ARD_EN_ADDR],
+		                          PS_GUI_UPD_LEN) == 0)
+		{
+			ret = (write_rtc_byte(SRAM_START_ADDR + PS_CHECKSUM_ADDR,
+			                       ps_shadow_buffer[PS_CHECKSUM_ADDR]) == 0);
+		} else {
+			ret = false;
+		}
+		break;
 	}
 	
-	return true;
+	return ret;
 }
 
 
 /**
  * Initialize our local array with default values.
+ *   Upgrade from version 1 layout if requested
  */
-static void ps_init_array()
+static void ps_init_array(bool upgrade)
 {
 	uint8_t sys_mac_addr[6];
 	char def_ssid[PS_SSID_MAX_LEN + 1];
 	
-	// Zero buffer
-	memset(ps_shadow_buffer, 0, SRAM_SIZE);
+	if (!upgrade) {
+		// Initialize the full array
+		
+		// Zero buffer
+		memset(ps_shadow_buffer, 0, SRAM_SIZE);
 	
-	// Get the system's default MAC address and add 1 to match the "Soft AP" mode
-	// (see "Miscellaneous System APIs" in the ESP-IDF documentation)
-	esp_efuse_mac_get_default(sys_mac_addr);
-	sys_mac_addr[5] = sys_mac_addr[5] + 1;
+		// Get the system's default MAC address and add 1 to match the "Soft AP" mode
+		// (see "Miscellaneous System APIs" in the ESP-IDF documentation)
+		esp_efuse_mac_get_default(sys_mac_addr);
+		sys_mac_addr[5] = sys_mac_addr[5] + 1;
 	
-	// Construct our default SSID/Camera name
-	sprintf(def_ssid, "%s%c%c%c%c", PS_DEFAULT_SSID,
-	        ps_nibble_to_ascii(sys_mac_addr[4] >> 4),
-	        ps_nibble_to_ascii(sys_mac_addr[4]),
-	        ps_nibble_to_ascii(sys_mac_addr[5] >> 4),
-	        ps_nibble_to_ascii(sys_mac_addr[5]));
+		// Construct our default SSID/Camera name
+		sprintf(def_ssid, "%s%c%c%c%c", PS_DEFAULT_AP_SSID,
+		        ps_nibble_to_ascii(sys_mac_addr[4] >> 4),
+		        ps_nibble_to_ascii(sys_mac_addr[4]),
+		        ps_nibble_to_ascii(sys_mac_addr[5] >> 4),
+	 	        ps_nibble_to_ascii(sys_mac_addr[5]));
+		
+		// Load fields
+		ps_shadow_buffer[PS_MAGIC_WORD_0_ADDR] = PS_MAGIC_WORD_0;
+		ps_shadow_buffer[PS_MAGIC_WORD_1_ADDR] = PS_MAGIC_WORD_1;
+		ps_shadow_buffer[PS_LAYOUT_VERSION_ADDR] = PS_LAYOUT_VERSION;
+		ps_shadow_buffer[PS_REC_EN_ADDR] = 0;
+		ps_shadow_buffer[PS_WIFI_EN_ADDR] = WIFI_INFO_FLAG_STARTUP_ENABLE;
+		ps_store_string(def_ssid, PS_WIFI_AP_SSID_ADDR, PS_SSID_MAX_LEN);
+		ps_store_string("", PS_WIFI_AP_PW_ADDR, PS_PW_MAX_LEN);
+	} else {
+		// Leave version 1 values but upgrade the version number
+		ps_shadow_buffer[PS_LAYOUT_VERSION_ADDR] = PS_LAYOUT_VERSION;
+	}
 	
-	// Load fields
-	ps_shadow_buffer[PS_MAGIC_WORD_0_ADDR] = PS_MAGIC_WORD_0;
-	ps_shadow_buffer[PS_MAGIC_WORD_1_ADDR] = PS_MAGIC_WORD_1;
-	ps_shadow_buffer[PS_LAYOUT_VERSION_ADDR] = PS_LAYOUT_VERSION;
-	ps_shadow_buffer[PS_REC_EN_ADDR] = 0;
-	ps_shadow_buffer[PS_WIFI_EN_ADDR] = 1;
-	ps_store_string(def_ssid, PS_WIFI_SSID_ADDR, PS_SSID_MAX_LEN);
-	ps_store_string("", PS_WIFI_PW_ADDR, PS_PW_MAX_LEN);
+	// Add default values for new items in this version
+	ps_store_string("", PS_WIFI_STA_SSID_ADDR, PS_SSID_MAX_LEN);
+	ps_store_string("", PS_WIFI_STA_PW_ADDR, PS_PW_MAX_LEN);
+	ps_shadow_buffer[PS_WIFI_AP_IP_ADDR  + 3] = 192;
+	ps_shadow_buffer[PS_WIFI_AP_IP_ADDR  + 2] = 168;
+	ps_shadow_buffer[PS_WIFI_AP_IP_ADDR  + 1] = 4;
+	ps_shadow_buffer[PS_WIFI_AP_IP_ADDR  + 0] = 1;
+	ps_shadow_buffer[PS_WIFI_STA_IP_ADDR + 3] = 192;
+	ps_shadow_buffer[PS_WIFI_STA_IP_ADDR + 2] = 168;
+	ps_shadow_buffer[PS_WIFI_STA_IP_ADDR + 1] = 4;
+	ps_shadow_buffer[PS_WIFI_STA_IP_ADDR + 0] = 2;
+	ps_shadow_buffer[PS_REC_ARD_EN_ADDR] = 1;
+	ps_shadow_buffer[PS_REC_LEP_EN_ADDR] = 1;
+	ps_shadow_buffer[PS_GAIN_MODE_ADDR] = (uint8_t) LEP_DEF_GAIN_MODE;
+	ps_store_string("Fusion", PS_PALETTE_NAME_ADDR, PS_PALETTE_NAME_LEN);
+	ps_shadow_buffer[PS_REC_INTERVAL_ADDR] = 0;
+	ps_shadow_buffer[PS_REC_INTERVAL_ADDR + 1] = 1;
 	
 	// Finally compute and load checksum
 	ps_shadow_buffer[PS_CHECKSUM_ADDR] = ps_compute_checksum();

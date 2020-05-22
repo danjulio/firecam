@@ -20,10 +20,15 @@
  *
  */
 #include "palettes.h"
+#include "arctic.h"
+#include "double_rainbow.h"
 #include "fusion.h"
 #include "gray.h"
+#include "ironblack.h"
+#include "rainbow.h"
 #include "esp_system.h"
 #include "esp_log.h"
+#include <string.h>
 
 
 //
@@ -33,13 +38,29 @@ static const char* TAG = "palettes";
 
 static palette_t palettes[PALETTE_COUNT] = {
 	{
+		.name = "Grayscale",
+		.map_ptr = &gray_palette_map
+	},
+	{
 		.name = "Fusion",
 		.map_ptr = &fusion_palette_map
 	},
 	{
-		.name = "Grayscale",
-		.map_ptr = &gray_palette_map
-	}
+		.name = "Rainbow",
+		.map_ptr = &rainbow_palette_map
+	},
+	{
+		.name = "Rainbow2",
+		.map_ptr = &double_rainbow_palette_map
+	},
+	{
+		.name = "Ironblack",
+		.map_ptr = &ironblack_palette_map
+	},
+	{
+		.name = "Arctic",
+		.map_ptr = &arctic_palette_map
+	},
 };
 
 
@@ -58,7 +79,7 @@ void set_palette(int n)
 {
 	int i;
 	
-	if (n < PALETTE_COUNT) {
+	if ((n >= 0) && (n < PALETTE_COUNT)) {
 		ESP_LOGI(TAG, "Loading %s color map", palettes[n].name);
 		
 		for (i=0; i<256; i++) {
@@ -70,4 +91,24 @@ void set_palette(int n)
 		}
 		cur_palette = n;
 	}
+}
+
+
+char* get_palette_name(int n)
+{
+	return palettes[n].name;
+}
+
+
+int get_palette_by_name(const char* name)
+{
+	int i;
+	
+	for (i=0; i<PALETTE_COUNT; i++) {
+		if (strcmp(name, palettes[i].name) == 0) {
+			return i;
+		}
+	}
+	
+	return -1;
 }

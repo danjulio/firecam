@@ -34,6 +34,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "nvs_flash.h"
+#include <lwip/sockets.h>
 #include <string.h>
 
 
@@ -44,13 +45,23 @@
 static const char* TAG = "wifi_utilities";
 
 // Wifi information
-static char wifi_ssid_array[PS_SSID_MAX_LEN+1];
-static char wifi_pw_array[PS_PW_MAX_LEN+1];
+static char wifi_ap_ssid_array[PS_SSID_MAX_LEN+1];
+static char wifi_sta_ssid_array[PS_SSID_MAX_LEN+1];
+static char wifi_ap_pw_array[PS_PW_MAX_LEN+1];
+static char wifi_sta_pw_array[PS_PW_MAX_LEN+1];
 static wifi_info_t wifi_info = {
-	wifi_ssid_array,
-	wifi_pw_array,
-	0
+	wifi_ap_ssid_array,
+	wifi_sta_ssid_array,
+	wifi_ap_pw_array,
+	wifi_sta_pw_array,
+	0,
+	{0, 0, 0, 0},
+	{0, 0, 0, 0},
+	{0, 0, 0, 0}
 };
+
+static bool sta_connected = false; // Set when we connect to an AP so we can disconnect if we restart
+static int sta_retry_num = 0;
 
 // FreeRTOS event group to signal when we are connected
 static EventGroupHandle_t wifi_event_group;
@@ -61,7 +72,8 @@ static EventGroupHandle_t wifi_event_group;
 // WiFi Utilities Forward Declarations for internal functions
 //
 static bool init_esp_wifi();
-static bool enable_esp_wifi_ap(bool en);
+static bool enable_esp_wifi_ap();
+static bool enable_esp_wifi_client();
 static esp_err_t sys_event_handler(void *ctx, system_event_t* event);
 
 
@@ -113,11 +125,20 @@ bool wifi_init()
 		
 		// Configure the WiFi interface if enabled
 		if ((wifi_info.flags & WIFI_INFO_FLAG_STARTUP_ENABLE) != 0) {
-			if (enable_esp_wifi_ap(true)) {
-				wifi_info.flags |= WIFI_INFO_FLAG_ENABLED;
-				ESP_LOGI(TAG, "WiFi AP %s enabled", wifi_info.ssid);
+			if ((wifi_info.flags & WIFI_INFO_FLAG_CLIENT_MODE) != 0) {
+				if (enable_esp_wifi_client()) {
+					wifi_info.flags |= WIFI_INFO_FLAG_ENABLED;
+					ESP_LOGI(TAG, "WiFi Station starting");
+				} else {
+					return false;
+				}
 			} else {
-				return false;
+				if (enable_esp_wifi_ap()) {
+					wifi_info.flags |= WIFI_INFO_FLAG_ENABLED;
+					ESP_LOGI(TAG, "WiFi AP %s enabled", wifi_info.ap_ssid);
+				} else {
+					return false;
+				}
 			}
 		}
 	} else {
@@ -134,31 +155,47 @@ bool wifi_init()
  */
 bool wifi_reinit()
 {
-	// Update the wifi info because we're called when it's updated
-	ps_get_wifi_info(&wifi_info);
-	
-	if ((wifi_info.flags & WIFI_INFO_FLAG_INITIALIZED) == 0) {
-		// Attempt to initialize the wifi interface again
-		if (init_esp_wifi()) {
-			wifi_info.flags |= WIFI_INFO_FLAG_INITIALIZED;
-		} else {
-			return false;
-		}
+	// Attempt to disconnect from an AP if we were previously connected
+	if (sta_connected) {
+		ESP_LOGI(TAG, "Attempting to disconnect from AP");
+		esp_wifi_disconnect();
+		sta_connected = false;
 	}
 	
 	// Shut down the old configuration
 	if ((wifi_info.flags & WIFI_INFO_FLAG_ENABLED) != 0) {
-		enable_esp_wifi_ap(false);
+		ESP_LOGI(TAG, "WiFi stopping");
+		esp_wifi_stop();
 		wifi_info.flags &= ~WIFI_INFO_FLAG_ENABLED;
 	}
+
+	if ((wifi_info.flags & WIFI_INFO_FLAG_INITIALIZED) == 0) {
+		// Attempt to initialize the wifi interface again
+		if (!init_esp_wifi()) {
+			return false;
+		}
+	}
+	
+	// Update the wifi info because we're called when it's updated
+	ps_get_wifi_info(&wifi_info);
+	wifi_info.flags |= WIFI_INFO_FLAG_INITIALIZED;   // Add in the fact we're already initialized
 	
 	// Reconfigure the interface if enabled
 	if ((wifi_info.flags & WIFI_INFO_FLAG_STARTUP_ENABLE) != 0) {
-		if (enable_esp_wifi_ap(true)) {
-			wifi_info.flags |= WIFI_INFO_FLAG_ENABLED;
-			ESP_LOGI(TAG, "WiFi AP %s enabled", wifi_info.ssid);
+		if ((wifi_info.flags & WIFI_INFO_FLAG_CLIENT_MODE) != 0) {
+			if (enable_esp_wifi_client()) {
+				wifi_info.flags |= WIFI_INFO_FLAG_ENABLED;
+				ESP_LOGI(TAG, "WiFi Station starting");
+			} else {
+				return false;
+			}
 		} else {
-			return false;
+			if (enable_esp_wifi_ap()) {
+				wifi_info.flags |= WIFI_INFO_FLAG_ENABLED;
+				ESP_LOGI(TAG, "WiFi AP %s enabled", wifi_info.ap_ssid);
+			} else {
+				return false;
+			}
 		}
 	}
 	
@@ -220,48 +257,118 @@ static bool init_esp_wifi()
 /**
  * Enable this device as a Soft AP
  */
-static bool enable_esp_wifi_ap(bool en)
+static bool enable_esp_wifi_ap()
 {
 	esp_err_t ret;
+	int i;
 	
-	if (en) {
-		// Enable the AP
-		wifi_config_t wifi_config = {
-        	.ap = {
-            	.ssid_len = strlen(wifi_info.ssid),
-            	.max_connection = 1,
-            	.authmode = WIFI_AUTH_WPA_WPA2_PSK
-        	},
-    	};
-    	strcpy((char*) wifi_config.ap.ssid, wifi_info.ssid);
-    	strcpy((char*) wifi_config.ap.password, wifi_info.pw);
-    	if (strlen(wifi_info.pw) == 0) {
-        	wifi_config.ap.authmode = WIFI_AUTH_OPEN;
+	// Enable the AP
+	wifi_config_t wifi_config = {
+        .ap = {
+            .ssid_len = strlen(wifi_info.ap_ssid),
+            .max_connection = 1,
+            .authmode = WIFI_AUTH_WPA_WPA2_PSK
+        }
+    };
+    strcpy((char*) wifi_config.ap.ssid, wifi_info.ap_ssid);
+    strcpy((char*) wifi_config.ap.password, wifi_info.ap_pw);
+    if (strlen(wifi_info.ap_pw) == 0) {
+        wifi_config.ap.authmode = WIFI_AUTH_OPEN;
+    }
+    
+    ret = esp_wifi_set_mode(WIFI_MODE_AP);
+    if (ret != ESP_OK) {
+    	ESP_LOGE(TAG, "Could not set Soft AP mode (%d)", ret);
+    	return false;
+    }
+    
+    ret = esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config);
+    if (ret != ESP_OK) {
+    	ESP_LOGE(TAG, "Could not set Soft AP configuration (%d)", ret);
+    	return false;
+    }
+    
+    ret = esp_wifi_start();
+    if (ret != ESP_OK) {
+    	ESP_LOGE(TAG, "Could not start Soft AP (%d)", ret);
+    	return false;
+    }
+    
+    // For now, since we are using the default IP address, copy it to the current here
+    for (i=0; i<4; i++) {
+    	wifi_info.cur_ip_addr[i] = wifi_info.ap_ip_addr[i];
+    }
+    	
+    return true;
+}
+
+
+/**
+ * Enable this device as a Client
+ */
+static bool enable_esp_wifi_client()
+{
+	esp_err_t ret;
+	tcpip_adapter_ip_info_t ipInfo;
+	
+	// Configure the IP address mechanism
+	if ((wifi_info.flags & WIFI_INFO_FLAG_CL_STATIC_IP) != 0) {
+		// Static IP
+		ret = tcpip_adapter_dhcpc_stop(TCPIP_ADAPTER_IF_STA);
+		if (ret != ESP_OK) {
+    		ESP_LOGW(TAG, "Stop Station DHCP returned %d", ret);
     	}
     	
-    	ret = esp_wifi_set_mode(WIFI_MODE_AP);
-    	if (ret != ESP_OK) {
-    		ESP_LOGE(TAG, "Could not set Soft AP mode (%d)", ret);
-    		return false;
-    	}
-    	
-    	ret = esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config);
-    	if (ret != ESP_OK) {
-    		ESP_LOGE(TAG, "Could not set Soft AP configuration (%d)", ret);
-    		return false;
-    	}
-    	
-    	ret = esp_wifi_start();
-    	if (ret != ESP_OK) {
-    		ESP_LOGE(TAG, "Could not start Soft AP (%d)", ret);
-    		return false;
-    	}
-    	
-    	return true;
+		ipInfo.ip.addr = wifi_info.sta_ip_addr[3] |
+						 (wifi_info.sta_ip_addr[2] << 8) |
+						 (wifi_info.sta_ip_addr[1] << 16) |
+						 (wifi_info.sta_ip_addr[0] << 24);
+  		inet_pton(AF_INET, "0.0.0.0", &ipInfo.gw);
+  		inet_pton(AF_INET, "255.255.255.0", &ipInfo.netmask);
+  		tcpip_adapter_set_ip_info(TCPIP_ADAPTER_IF_STA, &ipInfo);
 	} else {
-		// Disable the AP
-		return (esp_wifi_stop() == ESP_OK);
+		ret = tcpip_adapter_dhcpc_start(TCPIP_ADAPTER_IF_STA);
+		if (ret != ESP_OK) {
+    		ESP_LOGE(TAG, "Start Station DHCP returned %d", ret);
+    	}
 	}
+	
+	// Enable the Client
+	wifi_config_t wifi_config = {
+		.sta = {
+			.scan_method = WIFI_FAST_SCAN,
+			.bssid_set = 0,
+			.channel = 0,
+			.listen_interval = 0,
+			.sort_method = WIFI_CONNECT_AP_BY_SIGNAL			
+		}
+	};	
+    strcpy((char*) wifi_config.sta.ssid, wifi_info.sta_ssid);
+    if (strlen(wifi_info.sta_pw) == 0) {
+        strcpy((char*) wifi_config.sta.password, "");
+    } else {
+    	strcpy((char*) wifi_config.sta.password, wifi_info.sta_pw);
+    }
+    
+    ret = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (ret != ESP_OK) {
+    	ESP_LOGE(TAG, "Could not set Station mode (%d)", ret);
+    	return false;
+    }
+    
+    ret = esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config);
+    if (ret != ESP_OK) {
+    	ESP_LOGE(TAG, "Could not set Station configuration (%d)", ret);
+    	return false;
+    }
+    
+    ret = esp_wifi_start();
+    if (ret != ESP_OK) {
+    	ESP_LOGE(TAG, "Could not start Station (%d)", ret);
+    	return false;
+    }
+    
+    return true;
 }
 
 
@@ -284,7 +391,40 @@ static esp_err_t sys_event_handler(void *ctx, system_event_t* event)
                  MAC2STR(event->event_info.sta_disconnected.mac),
                  event->event_info.sta_disconnected.aid);
 			break;
-		
+			
+		case SYSTEM_EVENT_STA_START:
+			ESP_LOGI(TAG, "Station started, trying to connect to %s", wifi_info.sta_ssid);
+			sta_retry_num = 0;
+        	esp_wifi_connect();
+        	break;
+        
+        case SYSTEM_EVENT_STA_STOP:
+        	ESP_LOGI(TAG, "Station stopped");
+        	break;
+        	
+        case SYSTEM_EVENT_STA_GOT_IP:
+        	wifi_info.flags |= WIFI_INFO_FLAG_CONNECTED;
+        	uint32_t ip = event->event_info.got_ip.ip_info.ip.addr;
+        	ESP_LOGI(TAG, "Connected. Got ip: %s", ip4addr_ntoa(&event->event_info.got_ip.ip_info.ip));
+        	wifi_info.cur_ip_addr[3] = ip & 0xFF;
+        	wifi_info.cur_ip_addr[2] = (ip >> 8) & 0xFF;
+        	wifi_info.cur_ip_addr[1] = (ip >> 16) & 0xFF;
+			wifi_info.cur_ip_addr[0] = (ip >> 24) & 0xFF;
+			sta_connected = true;
+        	sta_retry_num = 0;
+        	break;
+        	
+        case SYSTEM_EVENT_STA_DISCONNECTED:
+        	wifi_info.flags &= ~WIFI_INFO_FLAG_CONNECTED;
+        	if (sta_retry_num < WIFI_MAX_RECONNECT_ATTEMPTS) {
+                esp_wifi_connect();
+                sta_retry_num++;
+                ESP_LOGI(TAG, "Retry connection to %s", wifi_info.sta_ssid);
+            } else {
+            	ESP_LOGI(TAG, "Giving up reconnecting");
+            }
+        	break;
+        	
 		default:
 			break;
 	}
