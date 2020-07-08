@@ -329,15 +329,17 @@ Individual args values may be left out.  The camera will use the existing value.
 {
   "cmd": "set_wifi",
   "args": {
+    "ap_ssid": "FireCam-3"
+    "ap_pw: "apassword"
     "ap_ip_addr": "192.168.4.1",
     "flags": 145,
     "sta_ssid": "RoboNet",
-    "sta_pw": "",
+    "sta_pw": "anotherpassword",
     "sta_ip_addr": "10.0.1.144"
   }
 }
 ```
-Individual args values may be left out.  The camera will use the existing value.
+Individual args values may be left out (for example to just set AP or Client (sta) values.  The camera will use the existing value.
 
 Only a subset of the flags argument are used.  Other bit positions are ignored.
 

@@ -41,5 +41,5 @@ Click the `ESP32 Download Tool` button.  The ESP32 Download Tool program runs an
 
 1. Press and hold the power button on the camera.  It will boot up but this does not matter (the programming software will reset it).
 2. Continue to hold the power button depressed and press `START` to initiate programming.  A green progress bar will progress along the bottom of the window.  Programming should take 15-20 seconds.  The program will display `FINISH` upon a successful programming.
-3. Release the power button and the press it again.  The camera should boot into the new firmware.
+3. Release the power button and then press it again.  The camera should boot into the new firmware.
 

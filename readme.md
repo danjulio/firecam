@@ -20,7 +20,7 @@ FireCAM is a timelapse camera designed to take both visual and radiometric therm
 ![FireCAM Touchscreen Interface](pictures/main_screen.png)
 
 ### Origin
-FireCAM was designed for the [U.S. Forest Service Southern Research Station](https://www.srs.fs.usda.gov/).  It is released as Open Source software and hardware under the GPLv3 license.  The hardware design, firmware and a simple control application are contained in this repository.
+FireCAM was designed for the Joe O'Brien at [U.S. Forest Service Southern Research Station](https://www.srs.fs.usda.gov/).  It is released as Open Source software and hardware under the GPLv3 license.  The hardware design, firmware and a simple control application are contained in this repository.
 
 ![FireCAM in action](pictures/taking_pictures.png)
 
@@ -37,6 +37,10 @@ This repository currently contains:
 * Hardware Design Version: 3
 * Firmware Revision: 2.0
 * FireCAM Application Revision: 2.0
+
+### Digital Object Identifier
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.3935906.svg)](https://doi.org/10.5281/zenodo.3935906)
+
 
 ### Questions
 FireCAM was designed by Dan Julio (dan@danjuliodesigns.com).  Units may be available for purchase for qualified customers.  Customizations of the hardware, firmware or application are possible.
