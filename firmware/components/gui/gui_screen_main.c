@@ -1,7 +1,7 @@
 /*
  * Main GUI screen related functions, callbacks and event handlers
  *
- * Copyright 2020 Dan Julio
+ * Copyright 2020-2022 Dan Julio
  *
  * This file is part of firecam.
  *
@@ -20,6 +20,7 @@
  *
  */
 #include "esp_system.h"
+#include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -41,9 +42,19 @@
 #include <string.h>
 
 
+
+//
+// Main GUI Screen constants
+//
+
+// Uncomment to debug image display timing
+//#define GUI_DEBUG_IMG
+
+
 //
 // Main GUI Screen variables
 //
+static const char* TAG = "gui_main";
 
 // LVGL objects
 static lv_obj_t* main_screen;
@@ -264,6 +275,10 @@ void gui_screen_main_update_cam_image()
 	    
 		// Invalidate the object to force it to redraw from the buffer
 		lv_obj_invalidate(img_arducam);
+		
+#ifdef GUI_DEBUG_IMG
+		ESP_LOGI(TAG, "render cam");
+#endif
 	}
 }
 
@@ -295,6 +310,10 @@ void gui_screen_main_update_lep_image()
 
 	// Finally invalidate the object to force it to redraw from the buffer
 	lv_obj_invalidate(img_lepton);
+		
+#ifdef GUI_DEBUG_IMG
+		ESP_LOGI(TAG, "render lep");
+#endif
 }
 
 

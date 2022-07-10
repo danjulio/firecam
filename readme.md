@@ -35,8 +35,16 @@ FireCAM 's image system is based around a FLiR Lepton 3.5 thermal imaging module
 This repository currently contains:
 
 * Hardware Design Version: 3
-* Firmware Revision: 2.0
+* Firmware Revision: 2.1
 * FireCAM Application Revision: 2.0
+
+#### FW Revsion 2.1 Notes
+
+1. Compile with QIO Flash access enabled (faster flash access).
+2. Added Lepton state check (and refresh) before each acquisition.
+3. Fixed minor bug in lepton init code (no functional impact).
+4. Increased GUI task execution to every 50 mSec (was 100 mSec).
+5. Additional performance debugging capabilty (disabled by default).
 
 ### Digital Object Identifier
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.3935906.svg)](https://doi.org/10.5281/zenodo.3935906)

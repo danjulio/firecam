@@ -5,7 +5,7 @@
  * to evaluate its display related sub-tasks.  The GUI Task is responsible
  * for all access (updating) of the GUI managed by LittleVGL.
  *
- * Copyright 2020 Dan Julio
+ * Copyright 2020-2022 Dan Julio
  *
  * This file is part of firecam.
  *
@@ -206,8 +206,8 @@ static void gui_add_subtasks()
 	lvgl_tasks[LVGL_ST_SETTINGS] = lv_task_create(gui_screen_settings_update_task,
 		1000, LV_TASK_PRIO_LOW, NULL);
 		
-	// Event handler sub-task runs every 100 mSec
-	lvgl_tasks[LVGL_ST_EVENT] = lv_task_create(gui_task_event_handler_task, 100,
+	// Event handler sub-task runs every 50 mSec
+	lvgl_tasks[LVGL_ST_EVENT] = lv_task_create(gui_task_event_handler_task, 50,
 		LV_TASK_PRIO_LOW, NULL);
 }
 

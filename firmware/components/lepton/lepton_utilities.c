@@ -147,6 +147,116 @@ bool lepton_init()
 }
 
 
+bool lepton_check_reset_state()
+{
+	cc_gain_mode_t gain_mode;
+	gui_state_t gui_state;
+	uint32_t rsp;
+  
+  	// Attempt to ping the Lepton to validate communication
+  	// If this is successful, we assume further communication will be successful
+  	rsp = cci_run_ping();
+  	if (rsp != 0) {
+  		ESP_LOGE(TAG, "Lepton ping failed (%d)", rsp);
+  		return false;
+	}
+	
+	// Check Radiometry for TLinear enabled, auto-resolution
+	rsp = cci_get_radiometry_enable_state();
+	if (rsp != CCI_RADIOMETRY_ENABLED) {
+		ESP_LOGE(TAG, "Reset Lepton Radiometry");
+		cci_set_radiometry_enable_state(CCI_RADIOMETRY_ENABLED);
+		rsp = cci_get_radiometry_enable_state();
+		if (rsp != CCI_RADIOMETRY_ENABLED) {
+			ESP_LOGE(TAG, "Reset Lepton Radiometry failed");
+			return false;
+		}
+	}
+	
+	rsp = cci_get_radiometry_tlinear_enable_state();
+	if (rsp != CCI_RADIOMETRY_TLINEAR_ENABLED) {
+		ESP_LOGE(TAG, "Reset Lepton Radiometry TLinear");
+		cci_set_radiometry_tlinear_enable_state(CCI_RADIOMETRY_TLINEAR_ENABLED);
+  		rsp = cci_get_radiometry_tlinear_enable_state();
+  		if (rsp != CCI_RADIOMETRY_TLINEAR_ENABLED) {
+  			ESP_LOGE(TAG, "Reset Lepton Radiometry TLinear failed");
+			return false;
+  		}
+	}
+	
+	rsp = cci_get_radiometry_tlinear_auto_res();
+	if (rsp != CCI_RADIOMETRY_AUTO_RES_ENABLED) {
+		ESP_LOGE(TAG, "Reset Lepton Radiometry Auto Resolution");
+		cci_set_radiometry_tlinear_auto_res(CCI_RADIOMETRY_AUTO_RES_ENABLED);
+		rsp = cci_get_radiometry_tlinear_auto_res();
+		if (rsp != CCI_RADIOMETRY_AUTO_RES_ENABLED) {
+			ESP_LOGE(TAG, "Reset Lepton Radiometry Auto Resolution failed");
+			return false;
+		}
+	}
+	
+	// Check AGC disabled
+	rsp = cci_get_agc_enable_state();
+	if (rsp != CCI_AGC_DISABLED) {
+		ESP_LOGE(TAG, "Reset Lepton AGC");
+		cci_set_agc_enable_state(CCI_AGC_DISABLED);
+		rsp = cci_get_agc_enable_state();
+		if (rsp != CCI_AGC_DISABLED) {
+			ESP_LOGE(TAG, "Reset Lepton AGC failed");
+			return false;
+		}
+	}
+	
+	// Check telemetry enabled
+	rsp = cci_get_telemetry_enable_state();
+	if (rsp != CCI_TELEMETRY_ENABLED) {
+		ESP_LOGE(TAG, "Reset Lepton Telemetry enable");
+		cci_set_telemetry_enable_state(CCI_TELEMETRY_ENABLED);
+		if (rsp != CCI_TELEMETRY_ENABLED) {
+			ESP_LOGE(TAG, "Reset Lepton Telemetry enable failed");
+			return false;
+		}
+	}
+	
+	// Check gain mode matches persistent storage
+	ps_get_gui_state(&gui_state);
+	switch (gui_state.gain_mode) {
+		case SYS_GAIN_HIGH:
+			gain_mode = LEP_SYS_GAIN_MODE_HIGH;
+			break;
+		case SYS_GAIN_LOW:
+			gain_mode = LEP_SYS_GAIN_MODE_LOW;
+			break;
+		default:
+			gain_mode = LEP_SYS_GAIN_MODE_AUTO;
+	}
+	rsp = cci_get_gain_mode();
+	if (rsp != (uint32_t) gain_mode) {
+		ESP_LOGE(TAG, "Reset Lepton Gain Mode");
+		cci_set_gain_mode(gain_mode);
+		rsp = cci_get_gain_mode();
+		if (rsp != (uint32_t) gain_mode) {
+			ESP_LOGE(TAG, "Reset Lepton Gain Mode failed");
+			return false;
+		}
+	}
+	
+	// Make sure VSYNC is enabled on Lepton GPIO3
+	rsp = cci_get_gpio_mode();
+	if (rsp != LEP_OEM_GPIO_MODE_VSYNC) {
+		ESP_LOGE(TAG, "Reset Lepton GPIO Mode");
+		cci_set_gpio_mode(LEP_OEM_GPIO_MODE_VSYNC);
+		rsp = cci_get_gpio_mode();
+		if (rsp != LEP_OEM_GPIO_MODE_VSYNC) {
+			ESP_LOGE(TAG, "Reset Lepton GPIO Mode failed");
+			return false;
+		}
+	}
+	
+	return true;
+}
+
+
 void lepton_agc(bool en)
 {
 	if (en) {

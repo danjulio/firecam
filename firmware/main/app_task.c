@@ -3,7 +3,7 @@
  *
  * Implement the application logic for firecam.  The program's maestro. 
  *
- * Copyright 2020 Dan Julio
+ * Copyright 2020-2022 Dan Julio
  *
  * This file is part of firecam.
  *
@@ -54,6 +54,9 @@
 // Maximum wait period within a one second window to see both images before processing
 // whatever we have.  Should be divisible by APP_EVAL_MSEC.
 #define APP_MAX_WAIT_MSEC 800
+
+// Uncomment to trace image timing
+//#define APP_DEBUG_IMG
 
 
 enum app_state_t {
@@ -166,6 +169,9 @@ void app_task()
 			case WAIT_TOS:
 				// Look for the start of our one-second evaluation interval
 				if (time_changed(NULL, &app_prev_time)) {
+#ifdef APP_DEBUG_IMG
+					ESP_LOGI(TAG, "TOS");
+#endif
 					msec_count = 0;
 					app_state = WAIT_IMAGE;
 	
@@ -173,6 +179,9 @@ void app_task()
 						// Request cam_task update the shared buffer with a new image when available
 						xTaskNotify(task_handle_cam, CAM_NOTIFY_GET_FRAME_MASK, eSetBits);
 						cam_image_request_state = REQUESTED;
+#ifdef APP_DEBUG_IMG
+						ESP_LOGI(TAG, "  Req Cam");
+#endif
 					} else {
 						cam_image_request_state = IDLE;
 					}
@@ -180,6 +189,9 @@ void app_task()
 						// Request lep_task update the shared buffer with a new image when available
 						xTaskNotify(task_handle_lep, LEP_NOTIFY_GET_FRAME_MASK, eSetBits);
 						lep_image_request_state = REQUESTED;
+#ifdef APP_DEBUG_IMG
+						ESP_LOGI(TAG, "  Req Lep");
+#endif
 					} else {
 						lep_image_request_state = IDLE;
 					}
@@ -193,6 +205,9 @@ void app_task()
 						(!app_recording && !cmd_image_send_pending && cmd_requesting_image)) {
 
 						app_process_images(true, true);
+#ifdef APP_DEBUG_IMG
+						ESP_LOGI(TAG, "Process image early");
+#endif
 					}
 					app_state = WAIT_TOS;
 				} else if (msec_count >= APP_MAX_WAIT_MSEC) {
@@ -200,6 +215,9 @@ void app_task()
 					if (app_recording || cmd_requesting_image) {
 						app_process_images((cam_image_request_state == RECEIVED),
 						                   (lep_image_request_state == RECEIVED));
+#ifdef APP_DEBUG_IMG
+						ESP_LOGI(TAG, "Process image: cam = %d, lep = %d", cam_image_request_state == RECEIVED, lep_image_request_state == RECEIVED);
+#endif
 					}
 					app_state = WAIT_TOS;
 				}
@@ -267,6 +285,9 @@ static void app_task_handle_notifications()
 				// Notify the GUI to update
 				xTaskNotify(task_handle_gui, GUI_NOTIFY_CAM_FRAME_MASK, eSetBits);
 				cam_gui_update_pending = true;
+#ifdef APP_DEBUG_IMG
+				ESP_LOGI(TAG, "Got cam image");
+#endif
 			}
 		}
 		
@@ -290,6 +311,9 @@ static void app_task_handle_notifications()
 				// Notify the GUI to update
 				xTaskNotify(task_handle_gui, GUI_NOTIFY_LEP_FRAME_MASK, eSetBits);
 				lep_gui_update_pending = true;
+#ifdef APP_DEBUG_IMG
+				ESP_LOGI(TAG, "Got lep image");
+#endif
 			}
 		}
 		

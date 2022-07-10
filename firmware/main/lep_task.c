@@ -35,6 +35,7 @@
 #include "lep_task.h"
 #include "cci.h"
 #include "vospi.h"
+#include "lepton_utilities.h"
 #include "sys_utilities.h"
 #include "system_config.h"
 
@@ -76,6 +77,12 @@ void lep_task()
 		
 		done = false;
 		vsync_count = 0;
+		
+		if (!lepton_check_reset_state()) {
+			xTaskNotify(task_handle_app, APP_NOTIFY_LEP_FAIL_MASK, eSetBits);
+			done = true;
+		}
+		
 		while (!done) {
 			// Then spin waiting for vsync to be asserted
 			while (gpio_get_level(LEP_VSYNC_IO) == 0) {
@@ -102,6 +109,9 @@ void lep_task()
 					ESP_LOGE(TAG, "Could not get lepton image");
 					xTaskNotify(task_handle_app, APP_NOTIFY_LEP_FAIL_MASK, eSetBits);
 					done = true;
+					
+					// Reset the VoSPI pipeline
+					vTaskDelay(pdMS_TO_TICKS(200));
 				}
 			}
 		}
