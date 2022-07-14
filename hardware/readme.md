@@ -1,12 +1,13 @@
 ## FireCAM Hardware
 This directory contains hardware design files.  Schematic entry and PCB layout was done using Eagle 7.7.
 
-* display_mount - DXF and SVG files for the plastic display mount.
+* display_mount - DXF and SVG files for a laser cut plastic display mount, OpenSCAD and STL files for a 3-piece 3D printed base and display mount.
 * documentation - BOM, schematic, PCB image and helpful list of componentst to load on the PCB.
 * eagle - Schematic and PCB Layout design files.
 * gerber - PCB gerber files
 * stencil - Stencil gerber files
 
+![FireCAM unit 3D enclosure](pictures/firecam_rev3_3d_encl.png)
 ![FireCAM unit front](pictures/firecam_rev3_front.png)
 
 ![FireCAM unit rear](pictures/firecam_rev3_rear.png)
@@ -38,7 +39,12 @@ The Display harness contains the shared SPI bus for the LCD and Touchscreen, con
 
 ![FireCAM Wiring Harness Detail](pictures/display_cabling.png)
 
-#### Display Mount
+#### 3D Printed Base and Display Mount
+A base and two-piece display mount may be printed by slicing the STL files for your particular printer.  The STL was generated using OpenSCAD and the source files included here.
+
+![FireCAM 3D Printed Mount](pictures/3d_printed_parts.png)
+
+#### Laser Cut Display Mount
 The display mount is designed to be cut from a piece of 1/8" plastic on a laser cutter.
 
 ![FireCAM Display Mount](pictures/display_mount.png)
